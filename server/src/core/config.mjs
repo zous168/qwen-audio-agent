@@ -125,6 +125,7 @@ export function resolveBackendModels(env = process.env) {
     minimax: common,
     kimi: common,
     hermes: common,
+    cursor: common,
     codeBuddy: common,
     codex: common,
     claude: common,
@@ -236,6 +237,7 @@ export const config = {
   configDirectory: runtimeEnvironment.configDirectory,
   dataDirectory: runtimeEnvironment.dataDirectory,
   stateDirectory: runtimeEnvironment.stateDirectory,
+  sessionAgentProtocols: String(process.env.QWAUDIO_SESSION_AGENTS || '').split(',').map(value => value.trim()).filter(Boolean),
   cacheDirectory: runtimeEnvironment.cacheDirectory,
   // Optional read-only hosting of assets owned by an embedding client.
   webSkinsDirectory: process.env.QWEN_AUDIO_WEB_SKINS_DIR
@@ -419,6 +421,11 @@ export const config = {
       ),
       directory: resolveBackendWorkspace('codebuddy'),
       cliPath: String(process.env.CODEBUDDY_BIN || '').trim(),
+    },
+    cursor: {
+      model: String(backendModels.cursor).trim(),
+      directory: resolveBackendWorkspace('cursor'),
+      cliPath: String(process.env.CURSOR_BIN || '').trim(),
     },
     codex: {
       model: String(backendModels.codex).trim(),

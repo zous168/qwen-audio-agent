@@ -56,6 +56,11 @@ const message = document.querySelector('#message')
 const currentRealtime = document.querySelector('#current-realtime')
 const currentGateway = document.querySelector('#current-gateway')
 const currentBackend = document.querySelector('#current-backend')
+const assistantSoulEditor = document.querySelector('#assistant-soul')
+const assistantRoleName = document.querySelector('#assistant-role-name')
+const assistantSoulPath = document.querySelector('#assistant-soul-path')
+const assistantSoulStatus = document.querySelector('#assistant-soul-status')
+const saveAssistantSoul = document.querySelector('#save-assistant-soul')
 const updaterStatus = document.querySelector('#updater-status')
 const checkUpdates = document.querySelector('#check-updates')
 const openLogs = document.querySelector('#open-logs')
@@ -85,6 +90,9 @@ let applying = false
 let refreshingRuntime = false
 let updaterState = null
 let startupError = null
+let assistantSoul = null
+let assistantSoulEditable = false
+let savingAssistantSoul = false
 let recordingWakeShortcut = false
 const defaultWakeShortcut = 'CommandOrControl+Shift+Space'
 const macPlatform = /Mac|iPhone|iPad/.test(navigator.platform)
@@ -94,8 +102,42 @@ const realtimeForm = createRealtimeSettingsForm({
   panel: document.querySelector('#realtime-settings-panel'),
   translate: t,
   openExternal: url => window.qwenAudioAgentDesktop.openExternal(url),
+  onPreview: async ({ model, voice, isCurrent }) => {
+    const values = realtimeForm.values()
+    const AudioContextClass = window.AudioContext || window.webkitAudioContext
+    if (!AudioContextClass) throw new Error(t('此设备不支持音频播放'))
+    previewSource?.stop()
+    previewAudioContext ||= new AudioContextClass({ sampleRate: 24_000 })
+    await previewAudioContext.resume()
+    const result = await window.qwenAudioAgentDesktop.previewVoice({
+      model, voice, endpoint: values.realtimeBaseUrl,
+      credential: values.dashscopeApiKey,
+    })
+    if (realtimeForm.values().realtimeModel !== model || !isCurrent()) return false
+    const binary = atob(result.audio)
+    const count = Math.floor(binary.length / 2)
+    if (!count) throw new Error(t('模型没有返回试听音频'))
+    const buffer = previewAudioContext.createBuffer(1, count, result.sampleRate)
+    const samples = buffer.getChannelData(0)
+    for (let index = 0; index < count; index += 1) {
+      let value = binary.charCodeAt(index * 2) | (binary.charCodeAt(index * 2 + 1) << 8)
+      if (value >= 0x8000) value -= 0x10000
+      samples[index] = value / 32768
+    }
+    const source = previewAudioContext.createBufferSource()
+    source.buffer = buffer
+    source.connect(previewAudioContext.destination)
+    previewSource = source
+    await new Promise(resolve => {
+      source.onended = resolve
+      source.start()
+    })
+    if (previewSource === source) previewSource = null
+  },
   onChange: () => { showMessage(''); updateApplyState() },
 })
+let previewAudioContext = null
+let previewSource = null
 
 function selectSettingsTab(value, { focus = false } = {}) {
   const selected = settingsTabs.some(tab => tab.dataset.settingsTab === value)
@@ -736,7 +778,7 @@ function updateApplyState() {
   for (const section of document.querySelectorAll('[data-local-gateway-settings]')) {
     section.hidden = remote
     // Hidden URL fields must not fail browser form validation on a remote connect.
-    section.querySelectorAll('input, select').forEach(input => {
+    section.querySelectorAll('input, select, textarea').forEach(input => {
       if (input.closest('#backend-list')) return
       input.disabled = remote || input.hasAttribute('data-setting-unavailable')
     })
@@ -751,10 +793,61 @@ function updateApplyState() {
   submit.disabled = (
     applying
     || recordingWakeShortcut
-    || (!remote && gatewayUrl.value === settings?.gatewayUrl && !backendAvailable)
+    || (!remote && gatewayUrl.value === settings?.gatewayUrl
+      && selectedBackend() !== settings?.agentProtocol && !backendAvailable)
     || fingerprint(formSettings()) === appliedFingerprint
   )
+  saveAssistantSoul.disabled = remote || !assistantSoulEditable || savingAssistantSoul || !assistantSoul
+    || !assistantSoulEditor.value.trim()
+    || !assistantRoleName.value.trim()
+    || (assistantSoulEditor.value === assistantSoul.content
+      && assistantRoleName.value.trim() === assistantSoul.name)
 }
+
+function renderAssistantSoul() {
+  assistantSoulEditor.value = assistantSoul?.content || ''
+  assistantRoleName.value = assistantSoul?.name || ''
+  assistantSoulPath.textContent = assistantSoul?.path || ''
+  assistantSoulPath.title = assistantSoul?.path || ''
+  assistantSoulStatus.textContent = ''
+  updateApplyState()
+}
+
+assistantSoulEditor.addEventListener('input', () => {
+  assistantSoulStatus.textContent = ''
+  updateApplyState()
+})
+assistantRoleName.addEventListener('input', () => {
+  assistantSoulStatus.textContent = ''
+  updateApplyState()
+})
+
+saveAssistantSoul.addEventListener('click', async () => {
+  if (!assistantSoul || savingAssistantSoul) return
+  savingAssistantSoul = true
+  updateApplyState()
+  assistantSoulStatus.textContent = t('正在应用…')
+  try {
+    const result = await window.qwenAudioAgentDesktop.saveAssistantSoul({
+      content: assistantSoulEditor.value,
+      name: assistantRoleName.value.trim(),
+      expectedContent: assistantSoul.content,
+      expectedName: assistantSoul.name,
+    })
+    assistantSoul = result.soul
+    assistantSoulEditor.value = assistantSoul.content
+    assistantRoleName.value = assistantSoul.name
+    assistantSoulStatus.textContent = t(result.restarted
+      ? '语音 SOUL 已保存并重新连接。'
+      : '语音 SOUL 已保存，下次连接生效。')
+    void refreshRuntime()
+  } catch (error) {
+    assistantSoulStatus.textContent = friendlyError(error, t('保存失败，请重试'))
+  } finally {
+    savingAssistantSoul = false
+    updateApplyState()
+  }
+})
 
 function setBackendStatus(text, connected) {
   currentBackend.textContent = text
@@ -1133,6 +1226,8 @@ form.addEventListener('submit', async event => {
 
 window.qwenAudioAgentDesktop.loadSettings().then(value => {
   settings = value.settings
+  assistantSoul = value.assistantSoul
+  assistantSoulEditable = value.assistantSoulEditable === true
   settings.agentProtocol = initialBackendSelection({
     configuredBackend: settings.agentProtocol,
     firstRun: value.firstRun,
@@ -1141,6 +1236,7 @@ window.qwenAudioAgentDesktop.loadSettings().then(value => {
   runtime = value.runtime
   renderWakeShortcutStatus(value.wakeShortcutRegistered)
   render()
+  renderAssistantSoul()
   void detectBackendOptions()
   if (value.runtimeError) {
     startupError = value.runtimeError

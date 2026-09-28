@@ -2555,3 +2555,23 @@ test('builtinMcp defaults keep sessions working when disabled', async () => {
   assert.equal(coordinator[0].type, 'http')
   await adapter.close()
 })
+
+test('linked native session preserves its ID and never falls back to a new session', async () => {
+  const client = fakeAcpClient()
+  const resumed = []
+  let created = 0
+  client.resumeSession = async (id, options) => { resumed.push(id); return { sessionId: id, cwd: options.cwd } }
+  client.newSession = async () => { created++; return {sessionId:'unexpected'} }
+  const adapter = new AcpBackendAdapter({ protocol:'codex', client, directory:'/previous', linkedSession:{ownerId:'alice',sessionId:'original-thread'} })
+  const session = await adapter.ensureCoordinatorSession('alice')
+  assert.equal(session.sessionId, 'original-thread')
+  assert.deepEqual(resumed, ['original-thread'])
+  assert.equal(created, 0)
+  await assert.rejects(adapter.ensureCoordinatorSession('bob'), /不属于/)
+  await adapter.close()
+  client.resumeSession = async () => { throw new Error('missing thread') }
+  const broken = new AcpBackendAdapter({ protocol:'codex', client, linkedSession:{ownerId:'alice',sessionId:'missing'} })
+  await assert.rejects(broken.ensureCoordinatorSession('alice'), /无法恢复关联会话/)
+  assert.equal(created, 0)
+  await broken.close()
+})

@@ -1,6 +1,9 @@
 import { REALTIME_PROVIDERS, REALTIME_SETTING_SLOTS, realtimeSettingsProfileState, realtimeSettingsFromProfileState, realtimeProfileFieldKey } from '../../shared/realtime-provider-definitions.mjs'
 import { realtimeModelCatalog, resolveRealtimeModelProfile } from '../../shared/realtime-model-catalog.mjs'
+import { isKnownRealtimeSystemVoice, realtimeVoiceLabel, realtimeVoiceOptions } from '../../shared/realtime-voice-catalog.mjs'
 import { createSettingsPicker } from './settings-picker.mjs'
+
+const CUSTOM_VOICE_OPTION = '__custom_voice__'
 
 export function realtimeSettingsFields(provider, values) {
   const model = provider.settings.find(field => field.type === 'model')
@@ -19,11 +22,12 @@ export function realtimeSettingsFields(provider, values) {
       ...field, disabled: false,
       placeholder: field.modelFamily ? profile.sessionDefaults.voice || '模型默认音色'
         : field.placeholder || field.activeDefault || field.default,
+      voiceOptions: slot.slot === 'voice' ? realtimeVoiceOptions(provider.key, profile?.id) : null,
     }
   })
 }
 
-export function createRealtimeSettingsForm({ pickerRoot, panel, onChange, openExternal, translate = text => text }) {
+export function createRealtimeSettingsForm({ pickerRoot, panel, onChange, onPreview, openExternal, translate = text => text }) {
   const document = panel.ownerDocument
   const draft = settings => {
     const initial = realtimeSettingsProfileState(settings)
@@ -69,7 +73,8 @@ export function createRealtimeSettingsForm({ pickerRoot, panel, onChange, openEx
     const row = make('div', 'setting-row')
     const label = make('label', '', field.label)
     label.htmlFor = `realtime-${field.key || `${provider.key}-${field.slot}`}`
-    const input = make(field.type === 'model' && !field.disabled ? 'select' : 'input')
+    const voiceOptions = field.voiceOptions
+    const input = make((field.type === 'model' || voiceOptions) && !field.disabled ? 'select' : 'input')
     input.id = label.htmlFor
     input.dataset.realtimeSlot = field.slot
     if (field.disabled) {
@@ -82,6 +87,90 @@ export function createRealtimeSettingsForm({ pickerRoot, panel, onChange, openEx
       return row
     }
     input.dataset.setting = field.key
+    if (voiceOptions) {
+      const fallback = make('option')
+      fallback.value = ''
+      const voiceLanguage = translate('音色') === '音色' ? 'zh' : 'en'
+      fallback.textContent = `${translate('使用默认音色')}（${realtimeVoiceLabel(field.placeholder, voiceLanguage)}）`
+      input.append(fallback)
+      for (const voice of voiceOptions) {
+        const option = make('option', '', realtimeVoiceLabel(voice, voiceLanguage))
+        option.value = voice
+        input.append(option)
+      }
+      const custom = make('option', '', '自定义音色 ID…')
+      custom.value = CUSTOM_VOICE_OPTION
+      input.append(custom)
+      const savedVoice = values()[field.key]
+      const isCustom = Boolean(savedVoice && !voiceOptions.includes(savedVoice))
+      input.value = isCustom ? CUSTOM_VOICE_OPTION : savedVoice
+      const customInput = make('input', 'voice-custom-input')
+      customInput.type = 'text'
+      customInput.autocomplete = 'off'
+      customInput.spellcheck = false
+      customInput.placeholder = translate('输入自定义音色 ID')
+      customInput.setAttribute('aria-label', translate('自定义音色 ID'))
+      customInput.value = isCustom ? savedVoice : ''
+      customInput.hidden = !isCustom
+      customInput.required = isCustom
+      customInput.addEventListener('input', () => {
+        state.profiles[provider.key][realtimeProfileFieldKey(field)] = customInput.value.trim()
+        onChange()
+      })
+      input.addEventListener('change', () => {
+        const customSelected = input.value === CUSTOM_VOICE_OPTION
+        customInput.hidden = !customSelected
+        customInput.required = customSelected
+        state.profiles[provider.key][realtimeProfileFieldKey(field)] = customSelected
+          ? customInput.value.trim() : input.value
+        if (customSelected) customInput.focus()
+        onChange()
+      })
+      const controls = make('div', 'voice-select-controls')
+      const line = make('div', 'voice-preview-line')
+      line.append(input)
+      if (onPreview) {
+        const preview = make('button', 'voice-preview-button', '试听')
+        preview.type = 'button'
+        input.addEventListener('change', () => { preview.textContent = translate('试听') })
+        customInput.addEventListener('input', () => { preview.textContent = translate('试听') })
+        preview.addEventListener('click', async () => {
+          const voice = input.value === CUSTOM_VOICE_OPTION ? customInput.value.trim()
+            : input.value || field.placeholder
+          const isCurrent = () => panel.contains(input)
+            && (input.value === CUSTOM_VOICE_OPTION ? customInput.value.trim()
+              : input.value || field.placeholder) === voice
+          if (!voice) {
+            feedback.textContent = translate('输入自定义音色 ID')
+            feedback.hidden = false
+            return
+          }
+          feedback.hidden = true
+          preview.disabled = true
+          preview.textContent = translate('试听中…')
+          try {
+            const played = await onPreview({ model: values().realtimeModel, voice, isCurrent })
+            preview.textContent = played === false || !isCurrent()
+              ? translate('试听') : translate('试听完成')
+          } catch (error) {
+            preview.textContent = translate('重试试听')
+            feedback.textContent = error.message || translate('试听失败')
+            feedback.hidden = false
+          } finally {
+            preview.disabled = false
+          }
+        })
+        line.append(preview)
+      }
+      const feedback = make('p', 'voice-preview-feedback')
+      feedback.setAttribute('role', 'status')
+      feedback.hidden = true
+      input.addEventListener('change', () => { feedback.hidden = true })
+      customInput.addEventListener('input', () => { feedback.hidden = true })
+      controls.append(line, customInput, feedback)
+      row.append(label, controls)
+      return row
+    }
     if (field.type === 'model') {
       const catalog = realtimeModelCatalog(provider.key)
       for (const profile of catalog?.profiles || []) {
@@ -109,6 +198,16 @@ export function createRealtimeSettingsForm({ pickerRoot, panel, onChange, openEx
     input.addEventListener('change', () => {
       state.profiles[provider.key][realtimeProfileFieldKey(field)] = input.value
       if (field.type === 'model') {
+        const nextProfile = resolveRealtimeModelProfile(input.value, provider.key)
+        const voiceField = provider.settings.find(candidate => candidate.slot === 'voice'
+          && (!candidate.modelFamily || candidate.modelFamily === nextProfile.family))
+        const voiceKey = voiceField && realtimeProfileFieldKey(voiceField)
+        const voice = voiceKey && state.profiles[provider.key][voiceKey]
+        const options = realtimeVoiceOptions(provider.key, input.value)
+        if (voice && options && !options.includes(voice)
+          && isKnownRealtimeSystemVoice(provider.key, voice)) {
+          state.profiles[provider.key][voiceKey] = ''
+        }
         render()
         panel.querySelector(`[data-setting="${field.key}"]`)?.focus()
       }

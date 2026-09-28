@@ -613,7 +613,7 @@ export function createRealtimeSessionRuntime({
     } else if (event.type === 'error') {
       // A response refused by a busy single-slot provider is retried by the
       // frontend transparently; nothing user-facing happened.
-      if (event.__voiceRetried) return
+      if (event.__voiceRetried || event.__voiceInterrupted) return
       const errorMessage = realtimeEventErrorMessage(event)
       const providerError = realtimeSession.classifyError(errorMessage)
       const recoverableInactivity = providerError === 'inactivity'

@@ -1,6 +1,7 @@
 import express from 'express'
 import { randomUUID } from 'node:crypto'
 import { resolve } from 'node:path'
+import { loadAssistantRoleName } from '../conversation/frontend-agent-context.mjs'
 import { runWithLogContext } from '../core/logger.mjs'
 import { describeActiveRealtime } from '../voice/realtime-provider.mjs'
 import { PERMISSION_DECISIONS } from '../core/work-authorization.mjs'
@@ -25,6 +26,7 @@ import {
   parseGatewayConnectionEndpoint,
 } from '../access/device-connection.mjs'
 import { replaySession } from '../session/session-replay.mjs'
+import { listConversationSessions } from './conversation-session-list.mjs'
 
 /** Register HTTP adapters using already-assembled services; owns no service lifecycle. */
 export function registerGatewayHttpRoutes(app, {
@@ -243,9 +245,51 @@ export function registerGatewayHttpRoutes(app, {
     res.json({ ok: true, status: 'ready' })
   })
 
+  app.get('/api/agent-sessions', (req, res) => {
+    res.json({
+      agents: agent.choices?.() || [],
+      sessions: agent.list?.(req.identity.ownerId) || [],
+      conversations: listConversationSessions(sessionJournalRuntime, req.identity.ownerId),
+    })
+  })
+  app.post('/api/conversations', async (req, res) => {
+    const sessionId = randomUUID()
+    const title = String(req.body?.title || '').trim().slice(0, 80)
+    try {
+      const created = await sessionJournalRuntime.append({
+        ownerId: req.identity.ownerId,
+        sessionId,
+        event: { type: 'session/start', payload: { title } },
+      })
+      if (!created) throw new Error('无法保存新会话')
+      res.json({ sessionId })
+    } catch (error) { res.status(500).json({ error: error.message }) }
+  })
+  app.post('/api/agent-sessions', (req, res) => {
+    if (req.identity.access !== 'local') return res.status(403).json({ error: '会话绑定只能在本机创建' })
+    if (!agent.bind) return res.status(409).json({ error: '未启用会话 Agent 绑定' })
+    try {
+      res.json(agent.bind({ sessionId: req.body?.sessionId, protocol: req.body?.protocol, workspace: req.body?.workspace, title: req.body?.title, ownerId: req.identity.ownerId }))
+    } catch (error) {
+      res.status(409).json({ error: error.message })
+    }
+  })
+  app.get('/api/codex-sessions', async (req, res) => {
+    if (req.identity.access !== 'local') return res.status(403).json({ error: '已有 Codex 会话只能在本机查看' })
+    if (!agent.listNativeSessions) return res.status(409).json({ error: '未启用会话关联' })
+    try { res.json({ sessions: await agent.listNativeSessions() }) }
+    catch (error) { res.status(502).json({ error: error.message }) }
+  })
+  app.post('/api/agent-sessions/link-codex', async (req, res) => {
+    if (req.identity.access !== 'local') return res.status(403).json({ error: '已有 Codex 会话只能在本机关联' })
+    if (!agent.linkNativeSession) return res.status(409).json({ error: '未启用会话关联' })
+    try { res.json(await agent.linkNativeSession({ ownerId: req.identity.ownerId, sessionId: req.body?.sessionId, nativeSessionId: req.body?.nativeSessionId })) }
+    catch (error) { res.status(409).json({ error: error.message, ...(error.code ? { code: error.code } : {}) }) }
+  })
   app.get('/api/health', (req, res) => {
-    const backend = agent.status()
-    const backendDescription = agent.describe()
+    const context = req.query.session ? { ownerId: req.identity.ownerId, sessionId: String(req.query.session) } : undefined
+    const backend = agent.status(undefined, context)
+    const backendDescription = agent.describe(context)
     const realtime = describeActiveRealtime(realtimeProvider, {
       registry: realtimeProviderRegistry,
     })
@@ -273,6 +317,13 @@ export function registerGatewayHttpRoutes(app, {
       realtimeModelCatalog: realtime.modelCatalog,
       realtimeInputSampleRate: realtime.inputSampleRate,
       realtimeConfigurationSignature: realtime.configurationSignature,
+      assistantName: (() => {
+        try {
+          return loadAssistantRoleName()
+        } catch {
+          return '语音助手'
+        }
+      })(),
       // Front ends a client may select for its session through the realtime
       // connect event.
       realtimeProviders: realtime.providers,

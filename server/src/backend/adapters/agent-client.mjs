@@ -19,6 +19,10 @@ export class AgentClient {
     return this.adapter.label
   }
 
+  listNativeSessions() { return this.adapter.listNativeSessions() }
+
+  validateNativeSession(id, directory) { return this.adapter.validateNativeSession(id, directory) }
+
   describe() {
     return this.adapter.describe()
   }

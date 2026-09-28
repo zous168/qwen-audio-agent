@@ -16,6 +16,7 @@ const expectedCommands = new Map([
   ['kimi', 'kimi login'],
   ['hermes', 'hermes setup --portal'],
   ['codebuddy', 'codebuddy'],
+  ['cursor', 'agent login'],
   ['codex', 'codex login'],
   ['claude', 'claude'],
   ['pi', 'pi'],

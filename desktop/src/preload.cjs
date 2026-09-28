@@ -118,6 +118,14 @@ contextBridge.exposeInMainWorld('qwenAudioAgentDesktop', {
     'qwen-audio-agent:settings-save',
     settings,
   ),
+  saveAssistantSoul: payload => ipcRenderer.invoke(
+    'qwen-audio-agent:assistant-soul-save',
+    payload,
+  ),
+  previewVoice: options => ipcRenderer.invoke(
+    'qwen-audio-agent:voice-preview',
+    options,
+  ),
   importSkin: () => ipcRenderer.invoke('qwen-audio-agent:skin-import'),
   removeSkin: id => ipcRenderer.invoke('qwen-audio-agent:skin-remove', id),
   setNodePath: nodePath => ipcRenderer.invoke(

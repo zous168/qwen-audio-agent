@@ -34,7 +34,8 @@ body {
 
 button,
 input,
-select {
+select,
+textarea {
   font: inherit;
   letter-spacing: 0;
 }
@@ -50,6 +51,7 @@ button:disabled {
 button:focus-visible,
 input:focus-visible,
 select:focus-visible,
+textarea:focus-visible,
 dialog:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
@@ -269,7 +271,7 @@ h2 {
 
 .settings-tabs {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 8px;
   padding: 4px;
   margin: 0 0 16px;
@@ -318,6 +320,40 @@ h2 {
   background: var(--panel);
 }
 
+.soul-settings-card {
+  display: grid;
+  gap: 10px;
+  padding: 18px 20px;
+}
+
+.soul-settings-card h2 { margin: 0; font-size: 16px; }
+.soul-settings-card > p { margin: 0; color: var(--text-secondary); font-size: 12px; }
+.soul-settings-card label { font-size: 13px; font-weight: 500; }
+.soul-settings-card input {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--divider);
+  border-radius: 8px;
+  background: var(--panel);
+  color: var(--text-primary);
+}
+.soul-settings-card textarea {
+  width: 100%;
+  min-height: 156px;
+  resize: vertical;
+  padding: 12px;
+  border: 1px solid var(--divider);
+  border-radius: 12px;
+  background: var(--panel);
+  color: var(--text-primary);
+  font-size: 14px;
+  line-height: 1.5;
+}
+.soul-settings-footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.soul-settings-footer span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-auxiliary); font-size: 11px; }
+.soul-settings-footer button { flex: none; padding: 8px 12px; border: 1px solid var(--divider); border-radius: 8px; background: var(--page); font-size: 13px; }
+.soul-settings-footer button:disabled { opacity: .5; }
+
 .realtime-settings-card {
   overflow: visible;
 }
@@ -331,6 +367,34 @@ h2 {
   background: var(--page);
   cursor: not-allowed;
 }
+
+.voice-select-controls {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.voice-preview-line {
+  display: flex;
+  gap: 8px;
+  min-width: 0;
+}
+
+.voice-preview-line select { flex: 1; }
+
+.voice-preview-button {
+  flex: none;
+  min-width: 72px;
+  padding: 0 12px;
+  border: 1px solid var(--divider);
+  border-radius: 8px;
+  background: var(--page);
+  color: var(--text-primary);
+  cursor: pointer;
+}
+
+.voice-preview-button:disabled { cursor: wait; opacity: .6; }
+.voice-preview-feedback { margin: 0; color: var(--text-auxiliary); font-size: 12px; }
 
 .setting-row {
   display: grid;

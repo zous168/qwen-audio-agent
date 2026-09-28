@@ -40,6 +40,17 @@ import {
 
 const DEFAULT_INPUT_RATE = 16000
 const OUTPUT_RATE = 24000
+function audioLevel(samples) {
+  if (!samples?.length) return 0
+  const stride = Math.max(1, Math.floor(samples.length / 256))
+  let power = 0
+  let count = 0
+  for (let index = 0; index < samples.length; index += stride) {
+    power += samples[index] * samples[index]
+    count++
+  }
+  return Math.min(1, Math.max(0, (Math.sqrt(power / count) - 0.005) * 10))
+}
 // Desktop CSP permits same-origin scripts, not inlined data: worklet URLs.
 const microphoneAudioWorkletProcessorUrl = new URL(
   './microphone-audio-worklet-processor.js?no-inline',
@@ -225,6 +236,7 @@ export default function useRealtimeVoice({
     createGatewayClientState,
   )
   const [inputReady, setInputReady] = useState(false)
+  const [audioLevels, setAudioLevels] = useState({ input: 0, output: 0 })
   const [imageBufferAvailable, setImageBufferAvailable] = useState(false)
   const additionalCapabilitiesSignature = JSON.stringify(additionalCapabilities)
   const clientToolsSignature = JSON.stringify(clientTools)
@@ -249,6 +261,8 @@ export default function useRealtimeVoice({
   const hasConnectedRef = useRef(false)
   const pendingManualInputsRef = useRef([])
   const audioRef = useRef(null)
+  const outputAnalyserRef = useRef(null)
+  const inputMeterRef = useRef({ level: 0, at: 0 })
   const currentTurnId = useRef('')
   const clientInstanceId = useRef(
     String(configuredClientInstanceId || '').trim() || crypto.randomUUID(),
@@ -308,13 +322,64 @@ export default function useRealtimeVoice({
     }
     if (!audioRef.current || audioRef.current.state === 'closed') {
       audioRef.current = new AudioContext()
+      if (clientType === 'desktop') {
+        const analyser = audioRef.current.createAnalyser()
+        analyser.fftSize = 1024
+        analyser.connect(audioRef.current.destination)
+        outputAnalyserRef.current = analyser
+      }
     }
     audioRef.current.resume().catch(reason => {
       setError(reason?.message || t('语音播放没有成功启用，请再点一次开启语音'))
       setVisualError(true)
     })
     return true
-  }, [])
+  }, [clientType])
+
+  const testPlayback = useCallback(async () => {
+    if (!activateAudio()) return false
+    const context = audioRef.current
+    try {
+      await context.resume()
+      const oscillator = context.createOscillator()
+      const gain = context.createGain()
+      const start = context.currentTime
+      oscillator.frequency.value = 660
+      gain.gain.setValueAtTime(0, start)
+      gain.gain.linearRampToValueAtTime(0.08, start + 0.03)
+      gain.gain.setValueAtTime(0.08, start + 1.35)
+      gain.gain.linearRampToValueAtTime(0, start + 1.5)
+      oscillator.connect(gain)
+      gain.connect(outputAnalyserRef.current || context.destination)
+      oscillator.start(start)
+      oscillator.stop(start + 1.5)
+      return true
+    } catch (reason) {
+      setError(reason?.message || t('语音播放失败'))
+      setVisualError(true)
+      return false
+    }
+  }, [activateAudio])
+
+  useEffect(() => {
+    if (clientType !== 'desktop') return undefined
+    const outputSamples = new Float32Array(1024)
+    const timer = setInterval(() => {
+      const recentInput = performance.now() - inputMeterRef.current.at < 350
+      const input = enabled && inputReady && recentInput
+        ? inputMeterRef.current.level : 0
+      let output = 0
+      if (outputAnalyserRef.current && audioRef.current?.state === 'running') {
+        outputAnalyserRef.current.getFloatTimeDomainData(outputSamples)
+        output = audioLevel(outputSamples)
+      }
+      setAudioLevels(previous => (
+        Math.abs(previous.input - input) >= 0.025
+        || Math.abs(previous.output - output) >= 0.025
+      ) ? { input, output } : previous)
+    }, 100)
+    return () => clearInterval(timer)
+  }, [clientType, enabled, inputReady])
 
   const sendSocketEvent = useCallback(event => {
     const socket = socketRef.current
@@ -533,7 +598,7 @@ export default function useRealtimeVoice({
       buffer.copyToChannel(samples, 0)
       source = context.createBufferSource()
       source.buffer = buffer
-      source.connect(context.destination)
+      source.connect(outputAnalyserRef.current || context.destination)
       // Remote playback has already accumulated real PCM in its jitter queue.
       // This small Web Audio lead is only for stable source scheduling.
       const leadSeconds = audioSchedulingLeadSeconds()
@@ -937,6 +1002,9 @@ export default function useRealtimeVoice({
             moduleUrl: microphoneAudioWorkletProcessorUrl,
             onSamples: rawSamples => {
               if (captureClosed) return
+              if (clientType === 'desktop' && performance.now() - inputMeterRef.current.at >= 40) {
+                inputMeterRef.current = { level: audioLevel(rawSamples), at: performance.now() }
+              }
               const samples = microphoneSamplesDuringManualInput(
                 rawSamples,
                 manualInputPendingRef.current,
@@ -1046,6 +1114,7 @@ export default function useRealtimeVoice({
     sendSocketEvent,
     sessionId,
     suspended,
+    clientType,
   ])
 
   useEffect(() => {
@@ -1061,12 +1130,14 @@ export default function useRealtimeVoice({
     if (!suspended) return
     const audio = audioRef.current
     audioRef.current = null
+    outputAnalyserRef.current = null
     audio?.close()
   }, [suspended])
 
   useEffect(() => () => {
     audioRef.current?.close()
     audioRef.current = null
+    outputAnalyserRef.current = null
   }, [])
 
   const interrupt = () => {
@@ -1157,6 +1228,7 @@ export default function useRealtimeVoice({
     state,
     visualState: visualVoiceState(state),
     inputReady,
+    audioLevels,
     imageBufferAvailable,
     error,
     visualError,
@@ -1164,6 +1236,7 @@ export default function useRealtimeVoice({
     wakeWordActive,
     ownership,
     activateAudio,
+    testPlayback,
     interrupt,
     wake,
     publishClientEvent,

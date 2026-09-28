@@ -22,10 +22,12 @@ export function createFrontendRuntime({
   frontendToolSources = [],
   memoryService, sessionDigests = null, notesStore,
   taskOperations, backendRuntime, backendAvailability = null,
+  backendAvailabilityForSession = null,
   respondAuthorization, respondInput, permissionPolicy,
   realtimeFrontendFactory,
   frontendRetrieval = null, frontendKnowledge = null,
   spawnThinkingDescription = '',
+  spawnThinkingDescriptionForSession = null,
 } = {}) {
   const observers = new SessionObservers(sessionObservers)
   const sessions = new Set()
@@ -49,7 +51,11 @@ export function createFrontendRuntime({
   return {
     createSession(options) {
       if (closed) throw new Error('Frontend runtime is closed')
-      const session = createRealtimeSessionRuntime({ ...dependencies, logger, ...options })
+      const session = createRealtimeSessionRuntime({
+        ...dependencies, logger, ...options,
+        ...(spawnThinkingDescriptionForSession ? { spawnThinkingDescription: spawnThinkingDescriptionForSession(options) } : {}),
+        ...(backendAvailabilityForSession ? { backendAvailability: backendAvailabilityForSession(options) } : {}),
+      })
       const closeSession = session.close
       session.close = () => {
         sessions.delete(session)

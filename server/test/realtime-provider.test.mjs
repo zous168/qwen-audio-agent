@@ -1925,6 +1925,39 @@ test('retires a sole automatic response when its provider error has no response 
   assert.equal(frontend.activeResponses.size, 0)
 })
 
+test('waits for speech to stop before creating a queued response', async () => {
+  const frontend = createQwenFrontend()
+  frontend.ready = true
+  let created = false
+  frontend.handleLifecycle({ type: 'input_audio_buffer.speech_started' })
+  const outcome = frontend.enqueueResponse('agent', {}, async () => {
+    created = true
+    return false
+  })
+  await new Promise(resolve => setImmediate(resolve))
+  assert.equal(created, false)
+  frontend.handleLifecycle({ type: 'input_audio_buffer.speech_stopped' })
+  assert.equal((await outcome).skipped, true)
+  assert.equal(created, true)
+})
+
+test('treats a tool continuation refused during speech as an interruption', async () => {
+  const frontend = createQwenFrontend()
+  frontend.ready = true
+  const outcome = frontend.enqueueResponse('agent', {}, async pending => {
+    pending.responseRequested = true
+    pending.responsePayload = { type: 'response.create' }
+  })
+  await new Promise(resolve => setImmediate(resolve))
+  const error = {
+    type: 'error',
+    error: { message: 'Cannot create response while user is speaking.' },
+  }
+  frontend.handleLifecycle(error)
+  assert.equal(error.__voiceInterrupted, true)
+  assert.deepEqual(await outcome, { cancelled: true, phase: 'input_busy' })
+})
+
 test('identifies a permission response rejected while the user is speaking', async () => {
   const frontend = createQwenFrontend()
   const sent = []

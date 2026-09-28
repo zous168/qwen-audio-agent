@@ -230,6 +230,25 @@ const definitions = new Map([
     supportsFullPermission: true,
     environment: { prefixes: ['CODEBUDDY_'] },
   }],
+  ['cursor', {
+    id: 'cursor',
+    label: 'Cursor',
+    workspaceEnvironment: 'CURSOR_WORKSPACE',
+    skills: { installer: 'cursor' },
+    setup: { command: 'agent', executableEnvironment: 'CURSOR_BIN', integration: 'native' },
+    lifecycle: {
+      installation: {
+        steps: [
+          { kind: 'script', command: 'curl https://cursor.com/install -fsS | bash', platforms: ['darwin', 'linux'] },
+          { kind: 'script', command: "irm 'https://cursor.com/install?win32=true' | iex", platforms: ['win32'] },
+        ],
+      },
+      configuration: { mode: 'backend-owned' },
+    },
+    onboarding: { command: 'agent login', hint: '请先安装 Cursor CLI 并完成 agent login。' },
+    supportsFullPermission: false,
+    environment: { prefixes: ['CURSOR_'] },
+  }],
   ['codex', {
     id: 'codex',
     label: 'Codex',

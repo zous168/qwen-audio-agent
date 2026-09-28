@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { config } from '../core/config.mjs'
 import { recentConversationMessages } from '../../../shared/conversation-history.mjs'
+import { assistantRoleName } from '../../../shared/assistant-role-name.mjs'
 
 const PROMPT_FILE = 'PROMPT.md'
 const ASSISTANT_FILE = 'ASSISTANT.md'
@@ -77,6 +78,10 @@ export function loadAssistantProfile() {
   ).trim()
   if (!content) throw new Error(`${ASSISTANT_FILE} must not be empty`)
   return [...content].slice(0, MAX_ASSISTANT_CHARS).join('')
+}
+
+export function loadAssistantRoleName() {
+  return assistantRoleName(loadAssistantProfile())
 }
 
 export function resolveAssistantProfile(agentContext = {}) {

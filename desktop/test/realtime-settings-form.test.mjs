@@ -8,6 +8,7 @@ import {
   realtimeSettingsValues,
 } from '../../shared/realtime-provider-definitions.mjs'
 import { realtimeSettingsFields } from '../src/realtime-settings-form.mjs'
+import { realtimeVoiceLabel, realtimeVoiceOptions } from '../../shared/realtime-voice-catalog.mjs'
 import { normalizeSettings, parseSettings } from '../src/settings-config.mjs'
 
 test('each provider has unique UI bindings and lossless structured drafts', () => {
@@ -59,7 +60,33 @@ test('Omni 3.8 uses the existing model, endpoint and voice settings', () => {
   assert.equal(fields[2].key, 'realtimeModel')
   assert.equal(fields[3].key, 'omniRealtimeVoice')
   assert.equal(fields[3].placeholder, 'Tina')
+  assert.equal(fields[3].voiceOptions.length, 56)
+  assert.equal(fields[3].voiceOptions.includes('Tina'), true)
+  assert.equal(fields[3].voiceOptions.includes('Cherry'), false)
   assert.deepEqual(realtimeSettingsFromProfileState(realtimeSettingsProfileState(values)), values)
+})
+
+test('voice choices follow the selected Qwen model without excluding custom IDs', () => {
+  const provider = REALTIME_PROVIDERS.find(item => item.key === 'dashscope')
+  const values = realtimeSettingsValues({ audioRealtimeVoice: 'my-cloned-voice' })
+  const audio = realtimeSettingsFields(provider, values)[3]
+  assert.deepEqual(audio.voiceOptions, [
+    'longanqian', 'longanlingxin', 'longanlingxi', 'longanxiaoxin', 'longanlufeng',
+  ])
+  assert.equal(values.audioRealtimeVoice, 'my-cloned-voice')
+  values.realtimeModel = 'qwen3.5-omni-plus-realtime'
+  const omni = realtimeSettingsFields(provider, values)[3]
+  assert.equal(omni.voiceOptions.length, 56)
+  assert.equal(omni.voiceOptions.includes('Ethan'), true)
+  assert.equal(omni.voiceOptions.includes('longanqian'), false)
+  assert.equal(realtimeVoiceOptions('stepfun', 'qwen-audio-3.0-realtime-plus'), null)
+})
+
+test('system voices show documented Chinese names alongside stable API IDs', () => {
+  assert.equal(realtimeVoiceLabel('longanlingxin'), '龙安灵心 · longanlingxin')
+  assert.equal(realtimeVoiceLabel('Tina'), '甜甜 · Tina')
+  assert.equal(realtimeVoiceLabel('Tina', 'en'), 'Tina')
+  assert.equal(realtimeVoiceLabel('custom-voice'), 'custom-voice')
 })
 
 test('service-owned model and voice rows stay visible but have no writable binding', () => {

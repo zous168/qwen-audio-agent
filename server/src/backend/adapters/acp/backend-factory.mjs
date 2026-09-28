@@ -19,6 +19,7 @@ export function createAcpBackendAdapter({
   timeoutMs = config.agentTimeoutMs,
   backends = {},
   sessionStatePath = config.backendSessionStatePath,
+  linkedSession = null,
   acpClient,
   acpClientFactory,
   sessionToolServer,
@@ -52,6 +53,7 @@ export function createAcpBackendAdapter({
     nativeDelegationAdapter:
       driver.createNativeDelegationAdapter?.(options) || null,
     sessionStatePath,
+    linkedSession,
     ...(acpClient ? { client: acpClient } : {}),
     ...(acpClientFactory ? { clientFactory: acpClientFactory } : {}),
     ...(sessionToolServer ? { sessionToolServer } : {}),

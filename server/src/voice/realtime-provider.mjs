@@ -149,6 +149,7 @@ export class RealtimeFrontend {
     this.recentContextInjected = false
     this.restoringContext = false
     this.audioInputStarted = false
+    this.inputSpeaking = false
     this.activeResponses = new Set()
     this.pendingResponses = []
     this.retryingResponses = new Set()
@@ -863,6 +864,12 @@ export class RealtimeFrontend {
   }
 
   handleLifecycle(event) {
+    if (event.type === 'input_audio_buffer.speech_started') {
+      this.inputSpeaking = true
+    } else if (event.type === 'input_audio_buffer.speech_stopped') {
+      this.inputSpeaking = false
+      this.resolveIdle()
+    }
     if (event.type === 'error'
       && this.provider.classifyError(realtimeEventErrorMessage(event)) === 'no_active_response') {
       // This acknowledges cancellation; it must not reject an unrelated item.
@@ -1051,6 +1058,11 @@ export class RealtimeFrontend {
       pending.busyRetries = (pending.busyRetries || 0) + 1
       event.__voiceRetried = true
       this.retryRefusedResponse(pending, kind)
+    } else if (kind === 'input_busy' && pending && pending.origin !== 'permission') {
+      // Speech can reach the provider before its VAD event reaches us. The
+      // user's new turn supersedes a tool continuation or task announcement.
+      event.__voiceInterrupted = true
+      this.settlePending(pending, { cancelled: true, phase: 'input_busy' })
     } else {
       this.settlePending(pending, { failed: true, phase: 'start' })
     }
@@ -1174,19 +1186,20 @@ export class RealtimeFrontend {
   }
 
   async whenIdle() {
-    while (this.responseSlot.blocked || this.activeResponses.size) {
+    while (this.inputSpeaking || this.responseSlot.blocked || this.activeResponses.size) {
       if (this.responseSlot.blocked) await this.responseSlot.wait()
       else await new Promise(resolve => this.idleWaiters.push(resolve))
     }
   }
 
   resolveIdle() {
-    if (this.activeResponses.size) return
+    if (this.inputSpeaking || this.activeResponses.size) return
     while (this.idleWaiters.length) this.idleWaiters.shift()?.()
   }
 
   resetResponses() {
     this.responseQueueGeneration += 1
+    this.inputSpeaking = false
     this.activeResponses.clear()
     this.responseSlot.release()
     this.rejectConversationItemWaiters(new Error('Realtime 会话已重置'))
@@ -1228,6 +1241,9 @@ export class RealtimeFrontend {
         this.diagnose({
           event: 'realtime.send_failed', provider: this.provider.key,
           code, bufferedBytes, messageBytes, limit,
+          transportBufferedBytes: this.ws?._socket?.writableLength,
+          senderBufferedBytes: this.ws?._sender?._bufferedBytes,
+          compression: this.ws?.extensions,
         })
       },
     })

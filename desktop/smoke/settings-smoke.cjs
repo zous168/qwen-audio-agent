@@ -8,6 +8,7 @@ module.exports = async function settingsSmoke({ BrowserWindow, ipcMain }) {
   const { parseDesktopGatewayInput } = await import('../src/gateway-connection.mjs')
   const { encodeGatewayPairingCode, encodeGatewayBrowserPairingCode } = await import('../../shared/gateway/remote-access.mjs')
   let settings = { ...parseSettings('', {}), agentProtocol: 'qwen' }
+  let assistantSoul = { path: '/test/ASSISTANT.md', content: '## Identity\nTest assistant\n', name: 'SOUL' }
   let saves = 0
   const runtime = () => ({
     gatewayConnected: true, gatewayUrl: settings.gatewayUrl,
@@ -15,7 +16,8 @@ module.exports = async function settingsSmoke({ BrowserWindow, ipcMain }) {
     backend: { protocol: 'qwen', label: 'Qwen Code', connected: true },
   })
   const handlers = {
-    'settings-load': () => ({ settings, runtime: runtime(), skins: [], wakeShortcutRegistered: true }),
+    'settings-load': () => ({ settings, assistantSoul, assistantSoulEditable: true,
+      runtime: runtime(), skins: [], wakeShortcutRegistered: true }),
     'settings-runtime-status': runtime,
     'settings-detect-backends': () => ({ backends: [{
       id: 'qwen', label: 'Qwen Code', ready: true, selected: true,
@@ -27,6 +29,12 @@ module.exports = async function settingsSmoke({ BrowserWindow, ipcMain }) {
       settings = { ...settings, ...(target.remote ? clientSettingsPatch(draft) : draft), gatewayUrl: target.origin }
       saves += 1
       return { settings, runtime: runtime(), wakeShortcutRegistered: true }
+    },
+    'assistant-soul-save': (_event, payload) => {
+      assert.equal(payload.expectedContent, assistantSoul.content)
+      assert.equal(payload.expectedName, assistantSoul.name)
+      assistantSoul = { ...assistantSoul, content: payload.content, name: payload.name }
+      return { soul: assistantSoul, restarted: true }
     },
   }
   for (const [name, handler] of Object.entries(handlers)) {
@@ -56,6 +64,27 @@ module.exports = async function settingsSmoke({ BrowserWindow, ipcMain }) {
       poll()
     })`)
     assert.equal(await evaluate(`document.querySelector('#gateway-pairing-code') === null`), true)
+    await evaluate(`document.querySelector('#soul-tab').click()`)
+    assert.equal(await evaluate(`document.querySelector('#assistant-soul').value`), assistantSoul.content)
+    assert.equal(await evaluate(`document.querySelector('#assistant-role-name').value`), 'SOUL')
+    assert.equal(await evaluate(`document.querySelector('#save-assistant-soul').disabled`), true)
+    assert.equal(await evaluate(`(() => {
+      const name = document.querySelector('#assistant-role-name')
+      name.value = '星语'
+      name.dispatchEvent(new Event('input', { bubbles: true }))
+      return !document.querySelector('#save-assistant-soul').disabled
+    })()`), true)
+    await evaluate(`document.querySelector('#save-assistant-soul').click()`)
+    await evaluate(`new Promise((resolve, reject) => {
+      const deadline = Date.now() + 3000
+      const poll = () => document.querySelector('#save-assistant-soul').disabled
+        && document.querySelector('#assistant-soul-status').textContent.includes('已保存')
+          ? resolve() : Date.now() > deadline ? reject(new Error('SOUL not saved')) : setTimeout(poll, 20)
+      poll()
+    })`)
+    assert.equal(assistantSoul.name, '星语')
+    assert.equal(await evaluate(`document.querySelector('#hermes-soul-card') === null`), true)
+    await evaluate(`document.querySelector('#voice-tab').click()`)
     // Exercise the actual dynamic form, including provider/model/language
     // switches. No user settings or provider API are accessed by this fixture.
     await evaluate(`(() => {
@@ -70,12 +99,30 @@ module.exports = async function settingsSmoke({ BrowserWindow, ipcMain }) {
         document.querySelector('#realtime-provider > button').click()
         document.querySelector('#realtime-provider [data-value="' + value + '"]').click()
       }
-      setRealtimeField('audioRealtimeVoice', 'audio-draft')
+      setRealtimeField('audioRealtimeVoice', 'longanlingxin')
+      window.voiceChangeApplyEnabled = !document.querySelector('button[type=submit]').disabled
+      const audioVoice = document.querySelector('[data-setting=audioRealtimeVoice]')
+      window.assertAudioVoiceOptions = [...audioVoice.options].map(option => option.value)
+      window.assertAudioVoiceLabels = [...audioVoice.options].map(option => option.textContent)
+      window.assertPreviewButton = document.querySelector('.voice-preview-button')?.textContent
+      audioVoice.value = '__custom_voice__'
+      audioVoice.dispatchEvent(new Event('change', { bubbles: true }))
+      const customVoice = document.querySelector('.voice-custom-input')
+      customVoice.value = 'audio-draft'
+      customVoice.dispatchEvent(new Event('input', { bubbles: true }))
       document.querySelector('#realtime-provider > button').click()
       const search = document.querySelector('#realtime-provider input[type=search]')
       search.value = 'step'
       search.dispatchEvent(new Event('input', { bubbles: true }))
     })()`)
+    assert.deepEqual(await evaluate(`assertAudioVoiceOptions`), [
+      '', 'longanqian', 'longanlingxin', 'longanlingxi', 'longanxiaoxin',
+      'longanlufeng', '__custom_voice__',
+    ])
+    assert.equal(await evaluate(`voiceChangeApplyEnabled`), true,
+      'A voice change remains applicable when the unchanged backend needs configuration')
+    assert.equal((await evaluate(`assertAudioVoiceLabels`))[2], '龙安灵心 · longanlingxin')
+    assert.equal(await evaluate(`assertPreviewButton`), '试听')
     assert.equal(await evaluate(`document.querySelectorAll('#realtime-provider [role=option]').length`), 1)
     await evaluate(`document.querySelector('#realtime-provider [data-value=stepfun]').click()`)
     assert.equal(await evaluate(`document.querySelector('[data-setting=stepfunRealtimeModel]').value`), 'stepaudio-3-realtime-preview')
@@ -85,11 +132,27 @@ module.exports = async function settingsSmoke({ BrowserWindow, ipcMain }) {
       setRealtimeField('stepfunRealtimeVoice', 'step-voice')
       selectFrontend('dashscope')
     })()`)
-    assert.equal(await evaluate(`document.querySelector('[data-setting=audioRealtimeVoice]').value`), 'audio-draft')
+    assert.equal(await evaluate(`document.querySelector('[data-setting=audioRealtimeVoice]').value`), '__custom_voice__')
+    assert.equal(await evaluate(`document.querySelector('.voice-custom-input').value`), 'audio-draft')
     await evaluate(`setRealtimeField('realtimeModel', 'qwen3.5-omni-plus-realtime')`)
     assert.equal(await evaluate(`document.querySelector('[data-setting=omniRealtimeVoice]').value`), '')
     await evaluate(`(() => {
-      setRealtimeField('omniRealtimeVoice', 'omni-draft')
+      setRealtimeField('omniRealtimeVoice', 'Ethan')
+      setRealtimeField('realtimeModel', 'qwen3.8-omni-flash-realtime')
+    })()`)
+    assert.equal(await evaluate(`document.querySelector('[data-setting=omniRealtimeVoice]').value`), '',
+      'switching Omni models clears a known voice unsupported by the new model')
+    await evaluate(`(() => {
+      const voice = document.querySelector('[data-setting=omniRealtimeVoice]')
+      voice.value = '__custom_voice__'
+      voice.dispatchEvent(new Event('change', { bubbles: true }))
+      const custom = document.querySelector('.voice-custom-input')
+      custom.value = 'omni-draft'
+      custom.dispatchEvent(new Event('input', { bubbles: true }))
+      setRealtimeField('realtimeModel', 'qwen3.5-omni-plus-realtime')
+      if (document.querySelector('.voice-custom-input').value !== 'omni-draft') {
+        throw new Error('Custom Omni voice was lost when switching models')
+      }
       selectFrontend('speech-to-speech')
     })()`)
     assert.equal(await evaluate(`document.querySelector('[data-setting=speechToSpeechRealtimeUrl]').value`), 'ws://127.0.0.1:8765/v1/realtime')

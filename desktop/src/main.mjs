@@ -62,6 +62,8 @@ import {
 import { createOrbPlacement } from './orb-placement.mjs'
 import { bindOrbShell, configureOrbWindow } from './orb-shell.mjs'
 import { createSettingsStore } from './settings-store.mjs'
+import { createAssistantSoulStore } from './assistant-soul.mjs'
+import { previewRealtimeVoice } from './voice-preview.mjs'
 import { desktopClientPaths } from './client-paths.mjs'
 import { createDesktopBackendManagement } from './backend/management.mjs'
 import {
@@ -129,6 +131,11 @@ const skinsRoot = clientPaths.skinsDirectory
 const desktopSettingsStore = createSettingsStore({
   configDir: runtimeEnvironment.configDirectory,
   clientDir: clientPaths.directory,
+})
+const assistantSoulStore = createAssistantSoulStore({
+  defaultPath: runtimeEnvironment.assistantProfilePath,
+  env: process.env,
+  runtimeRoot,
 })
 const desktopGatewayCredentials = createElectronGatewayCredentialStore({
   filePath: clientPaths.credentialsPath,
@@ -539,8 +546,9 @@ function createTray() {
     }
     if (process.platform === 'darwin') icon.setTemplateImage(true)
     tray = new Tray(icon)
-    tray.setToolTip('Qwen Audio Agent')
   }
+  const roleName = assistantSoulStore.load().name
+  tray.setToolTip(roleName)
   tray.setContextMenu(Menu.buildFromTemplate([
     {
       label: desktopText('显示悬浮球'),
@@ -552,7 +560,7 @@ function createTray() {
     },
     { type: 'separator' },
     {
-      label: desktopText('退出 Qwen Audio Agent'),
+      label: desktopLanguage.startsWith('en') ? `Quit ${roleName}` : `退出 ${roleName}`,
       click: () => app.quit(),
     },
   ]))
@@ -581,7 +589,7 @@ function createWindow() {
     alwaysOnTop: true,
     hasShadow: false,
     backgroundColor: '#00000000',
-    title: 'qwen-audio-agent',
+    title: assistantSoulStore.load().name,
     autoHideMenuBar: true,
     skipTaskbar: true,
     show: false,
@@ -852,6 +860,8 @@ ipcMain.handle('qwen-audio-agent:settings-load', async event => {
   const settings = desktopSettingsStore.load()
   return {
     settings,
+    assistantSoul: assistantSoulStore.load(),
+    assistantSoulEditable: isLoopbackUrl(configuredGatewayOrigin) && !borrowedGatewayOrigin,
     skins: [...BUILTIN_ORB_SKINS, ...listSkins(skinsRoot)],
     runtime: setupRequired
       ? {
@@ -1007,6 +1017,35 @@ ipcMain.handle('qwen-audio-agent:settings-save', async (event, settings) => {
     throw new Error('无权保存设置')
   }
   return applyDesktopSettings(settings)
+})
+
+ipcMain.handle('qwen-audio-agent:assistant-soul-save', async (event, payload) => {
+  if (!settingsWindow || event.sender !== settingsWindow.webContents) {
+    throw new Error('无权保存语音 SOUL')
+  }
+  if (!isLoopbackUrl(configuredGatewayOrigin) || borrowedGatewayOrigin) {
+    throw new Error('语音 SOUL 只能在此桌面版管理的本地 Gateway 上修改')
+  }
+  const soul = assistantSoulStore.save(payload || {})
+  if (soul.changed) {
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.setTitle(soul.name)
+    createTray()
+  }
+  if (soul.changed && embeddedGateway?.running) {
+    appOrigin = await embeddedGateway.restart({
+      preferredPort: gatewayPort(configuredGatewayOrigin),
+    })
+    process.env.QWEN_AUDIO_AGENT_URL = appOrigin
+    await ensureDesktopUi()
+  }
+  return { soul, restarted: soul.changed && Boolean(embeddedGateway?.running) }
+})
+
+ipcMain.handle('qwen-audio-agent:voice-preview', async (event, options) => {
+  if (!settingsWindow || event.sender !== settingsWindow.webContents) {
+    throw new Error('无权试听音色')
+  }
+  return previewRealtimeVoice(options || {})
 })
 
 async function applyDesktopSettings(settings) {

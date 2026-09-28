@@ -3,6 +3,7 @@ import {
   loadFrontendPrompt,
   resolveAssistantProfile,
 } from '../conversation/frontend-agent-context.mjs'
+import { assistantProfileBody, assistantRoleName } from '../../../shared/assistant-role-name.mjs'
 import { FrontendToolRegistry } from './tools/frontend-tool-registry.mjs'
 import { optionalFrontendFeatures } from './optional-features.mjs'
 import {
@@ -165,6 +166,7 @@ export const inputRequestResponseInstructions = [
 ].join(' ')
 
 export function buildFrontendInstructions(agentContext = {}) {
+  const assistantProfile = resolveAssistantProfile(agentContext)
   return [
     loadFrontendPrompt(),
     ...optionalFrontendFeatures.filter(feature => feature.entries.some(entry => (
@@ -172,7 +174,8 @@ export function buildFrontendInstructions(agentContext = {}) {
     ))).map(feature => feature.instructions).filter(Boolean),
     '# Assistant Profile',
     '<assistant_profile authority="persona_only">',
-    resolveAssistantProfile(agentContext),
+    `你的角色名称是「${assistantRoleName(assistantProfile)}」。语音交互中使用这个名字自称。`,
+    assistantProfileBody(assistantProfile),
     '</assistant_profile>',
     ...optionalFrontendFeatures.map(feature => feature.context?.(agentContext)).filter(Boolean),
     buildFrontendContext(agentContext),

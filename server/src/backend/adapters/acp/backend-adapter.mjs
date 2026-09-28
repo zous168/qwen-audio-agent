@@ -130,6 +130,7 @@ export class AcpBackendAdapter {
     coordinatorAgent = '',
     profile,
     sessionStatePath = null,
+    linkedSession = null,
     client,
     clientFactory = createAcpClient,
     backendAvailable = endpointAvailable,
@@ -139,6 +140,7 @@ export class AcpBackendAdapter {
     nativeDelegationAdapter,
     builtinMcp = builtinMcpServers(),
   } = {}) {
+    this.linkedSession = linkedSession
     this.protocol = protocol
     this.root = root
     this.ownership = ownership === 'external' ? 'external' : 'owned'
@@ -435,7 +437,10 @@ export class AcpBackendAdapter {
       return this.coordinatorSessionPromises.get(key)
     }
     const pending = (async () => {
-      const stored = this.registry.get(key)
+      if (this.linkedSession && this.linkedSession.ownerId !== ownerId) throw new Error('关联会话不属于当前用户')
+      const stored = this.linkedSession
+        ? { sessionId: this.linkedSession.sessionId, cwd: this.directory, contractVersion: COORDINATOR_CONTRACT_VERSION }
+        : this.registry.get(key)
       const contractVersion = COORDINATOR_CONTRACT_VERSION
       let session
       const canResumeStored = Boolean(
@@ -460,12 +465,14 @@ export class AcpBackendAdapter {
             coordinatorAgent: this.coordinatorAgent,
           }) !== false
           if (!accepted) {
+            if (this.linkedSession) throw new Error('后台拒绝恢复关联会话')
             this.registry.delete(key)
             session = null
           } else {
             session.isNew = false
           }
-        } catch {
+        } catch (error) {
+          if (this.linkedSession) throw new Error(`无法恢复关联会话：${error.message}`)
           this.registry.delete(key)
         }
       }
@@ -634,6 +641,14 @@ export class AcpBackendAdapter {
         160,
       ) || this.profile.defaultDelegationTitle || `${this.label} 项目任务`,
     })
+  }
+
+  async listNativeSessions() {
+    return this.client.listSessions({ limit: 500 })
+  }
+
+  async validateNativeSession(sessionId, directory) {
+    await this.client.resumeSession(sessionId, { cwd: directory })
   }
 
   async listProjectSessions({ query, limit } = {}) {

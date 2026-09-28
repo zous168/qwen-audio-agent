@@ -58,6 +58,15 @@
             data-settings-tab="voice"
           >语音前台</button>
           <button
+            id="soul-tab"
+            class="settings-tab"
+            type="button"
+            role="tab"
+            aria-selected="false"
+            aria-controls="soul-settings"
+            data-settings-tab="soul"
+          >SOUL</button>
+          <button
             id="backend-tab"
             class="settings-tab"
             type="button"
@@ -93,6 +102,30 @@
               <div id="realtime-settings-panel">
                 <!-- Four standard fields, bound by the shared provider definitions. -->
               </div>
+            </div>
+          </section>
+
+          <section
+            id="soul-settings"
+            class="settings-group"
+            role="tabpanel"
+            aria-labelledby="soul-tab"
+            data-settings-panel="soul"
+            hidden
+          >
+            <p class="setting-hint" data-remote-gateway-note hidden>语音和后台 Agent 由远端 Gateway 配置。</p>
+            <div class="settings-card soul-settings-card" data-local-gateway-settings>
+              <h2>语音前台 SOUL</h2>
+              <p>角色名称会显示在悬浮球和对话面板中，也会告诉语音助手如何自称。</p>
+              <label for="assistant-role-name">角色名称</label>
+              <input id="assistant-role-name" type="text" maxlength="40" autocomplete="off">
+              <label for="assistant-soul">人设内容</label>
+              <textarea id="assistant-soul" rows="8" maxlength="4000" spellcheck="false"></textarea>
+              <div class="soul-settings-footer">
+                <span id="assistant-soul-path"></span>
+                <button id="save-assistant-soul" type="button" disabled>保存 SOUL 并重连</button>
+              </div>
+              <p id="assistant-soul-status" role="status"></p>
             </div>
           </section>
 

@@ -1,3 +1,4 @@
+import { SessionAgentPanel } from './SessionAgentPanel.jsx'
 import {
   useCallback,
   useEffect,
@@ -185,6 +186,23 @@ function OrbControlIcon({ type, muted = false, collapsed = false }) {
   </svg>
 }
 
+function AudioLevelBars({ level, label }) {
+  const value = Math.max(0, Math.min(1, level || 0))
+  return <span
+    className={`desktop-audio-bars${value > 0.03 ? ' active' : ''}`}
+    role="meter"
+    aria-label={label}
+    aria-valuemin={0}
+    aria-valuemax={100}
+    aria-valuenow={Math.round(value * 100)}
+  >
+    {[0.55, 0.9, 1.15, 0.8, 0.6].map((scale, index) => <i
+      key={index}
+      style={{ height: `${4 + Math.round(value * 17 * scale)}px` }}
+    />)}
+  </span>
+}
+
 function upsertTask(items, taskId, update, fallback) {
   const index = items.findIndex(item => item.id === taskId)
   if (index < 0) return fallback ? [...items, fallback] : items
@@ -214,7 +232,8 @@ export default function App() {
     window.addEventListener('languagechange', refreshLanguage)
     return () => window.removeEventListener('languagechange', refreshLanguage)
   }, [])
-  const [sessionId, setSessionId] = useState(getSessionId)
+  const [sessionId] = useState(getSessionId)
+  const [sessionAgentOpenRequest, setSessionAgentOpenRequest] = useState(0)
   const [voiceEnabled, setVoiceEnabled] = useState(() => initialVoiceEnabled({
     desktopOrbMode,
     clientType: activeClientType,
@@ -224,6 +243,8 @@ export default function App() {
   const [messages, setMessages] = useState([])
   const [activity, setActivity] = useState(t('正在检查后台 Agent'))
   const [frontend, setFrontend] = useState({ label: 'Realtime Agent' })
+  const [assistantName, setAssistantName] = useState('语音助手')
+  useEffect(() => { document.title = assistantName }, [assistantName])
   const [modelStatus, setModelStatus] = useState(() => realtimeModelStatus())
   const videoCallSupported = !compactVoiceControl
     && modelStatus.modelInputModes.includes('video')
@@ -432,7 +453,7 @@ export default function App() {
   useEffect(() => {
     let cancelled = false
     let refreshTimer
-    const refresh = () => gatewayFetch('api/health', { cache: 'no-store' })
+    const refresh = () => gatewayFetch(`api/health?session=${encodeURIComponent(sessionId)}`, { cache: 'no-store' })
       .then(async response => ({ response, payload: await response.json() }))
       .then(({ response, payload }) => {
         if (cancelled) return
@@ -445,6 +466,7 @@ export default function App() {
         setFrontend({
           label: payload.realtimeLabel || payload.realtimeProvider || 'Realtime Agent',
         })
+        setAssistantName(payload.assistantName || '语音助手')
         setModelStatus(realtimeModelStatus(payload))
         setGatewayRuntime(gatewayReady ? 'ready' : 'failed')
         setBackend({
@@ -461,13 +483,11 @@ export default function App() {
           url: payload.backend?.uiPath || payload.backend?.baseUrl || '',
         })
         setActivity(response.ok ? t('Gateway 已连接') : t('能力服务尚未连接'))
-        if (desktopOrbMode) {
-          const backendSettled = !backendEnabled || [
-            'ready',
-            'failed',
-          ].includes(backendPayload.status)
-          refreshTimer = setTimeout(refresh, backendSettled ? 3000 : 500)
-        }
+        const backendSettled = !backendEnabled || [
+          'ready',
+          'failed',
+        ].includes(backendPayload.status)
+        refreshTimer = setTimeout(refresh, backendSettled ? (desktopOrbMode ? 3000 : 10000) : 500)
       })
       .catch(() => {
         if (cancelled) return
@@ -480,7 +500,7 @@ export default function App() {
       cancelled = true
       clearTimeout(refreshTimer)
     }
-  }, [])
+  }, [sessionId])
 
   const updateUserTranscript = useCallback((event, final = false) => {
     const id = event.turnId ? `user:${event.turnId}` : crypto.randomUUID()
@@ -1105,19 +1125,7 @@ export default function App() {
     .trim()
 
   const resetSession = () => {
-    setVideoCallOpen(false)
-    taskDismissTimers.current.forEach(timer => clearTimeout(timer))
-    taskDismissTimers.current.clear()
-    const next = crypto.randomUUID()
-    localStorage.setItem('qwen-audio-agent.session', next)
-    setSessionId(next)
-    setMessages([])
-    setAgentTasks([])
-    currentTurnId.current = ''
-    activeVoiceResponse.current = ''
-    responseTurnMap.current.clear()
-    agentTurnIds.current.clear()
-    setActivity(t('已创建新会话'))
+    setSessionAgentOpenRequest(value => value + 1)
   }
 
   const enableVoice = () => {
@@ -1207,7 +1215,7 @@ export default function App() {
           dragging: orbDragging,
           lifecycle: desktopLifecycle,
         })}
-        aria-label={`qwen-audio · ${voice.visualError || voiceConnectionError ? t('连接异常') : labelFor(orbVisualState)}`}
+        aria-label={`${assistantName} · ${voice.visualError || voiceConnectionError ? t('连接异常') : labelFor(orbVisualState)}`}
         title={
           desktopLifecycle === 'waking'
             ? t('正在显示悬浮球')
@@ -1391,7 +1399,7 @@ export default function App() {
   >
     <label>{message.role === 'user'
       ? t('你')
-      : message.companion ? resultLabel(message) : 'qwen-audio'}</label>
+      : message.companion ? resultLabel(message) : assistantName}</label>
     <MessageContent
       role={message.role}
       content={message.content}
@@ -1405,7 +1413,7 @@ export default function App() {
     desktopOrbMode ? ' desktop-conversation-panel' : ''
   }`}>
     <header>
-      <div className="brand"><span>V</span><div>qwen-audio-agent<small>REALTIME VOICE · LIVE</small></div></div>
+      <div className="brand"><span>{assistantName[0]}</span><div>{assistantName}<small>REALTIME VOICE · LIVE</small></div></div>
       <a
         className="backend"
         href={backend.url || undefined}
@@ -1428,8 +1436,8 @@ export default function App() {
       <div className="status">
         <i className={orbVisualState} /><span>{labelFor(orbVisualState)}</span>
       </div>
-      {/* 资料库入口只在 web 模式给：桌面悬浮球的 header 已经紧到把「新会话」
-          压成一个「＋」，再塞一个文字按钮会挤掉语音按钮 */}
+      <SessionAgentPanel sessionId={sessionId} openRequest={sessionAgentOpenRequest}
+        requestedView={desktopOrbMode ? 'sessions' : 'create'} showLauncher={!desktopOrbMode} />
       {!desktopOrbMode && (
         <button
           className={`ghost${showKnowledgeLibrary ? ' active' : ''}`}
@@ -1442,9 +1450,9 @@ export default function App() {
       <button
         className={`ghost${desktopOrbMode ? ' desktop-new-session' : ''}`}
         onClick={resetSession}
-        aria-label={t('新会话')}
-        title={desktopOrbMode ? t('新会话') : undefined}
-      >{desktopOrbMode ? '＋' : t('新会话')}</button>
+        aria-label={desktopOrbMode ? t('切换或新建会话') : t('新会话')}
+        title={desktopOrbMode ? t('切换或新建会话') : undefined}
+      >{desktopOrbMode ? '⇄' : t('新会话')}</button>
       <button
         className={[
           'voice',
@@ -1481,6 +1489,25 @@ export default function App() {
         <OrbControlIcon type="collapse" />
       </button>}
     </header>
+
+    {desktopOrbMode && <div className="desktop-audio-feedback" aria-live="off">
+      <div className="desktop-audio-feedback-channel input">
+        <span>{voiceEnabled
+          ? voice.inputReady ? t('收音') : t('麦克风准备中')
+          : t('麦克风已静音')}</span>
+        <AudioLevelBars level={voiceEnabled ? voice.audioLevels.input : 0} label={t('麦克风输入电平')} />
+      </div>
+      <div className="desktop-audio-feedback-channel output">
+        <span>{t('播放')}</span>
+        <AudioLevelBars level={voice.audioLevels.output} label={t('语音播放电平')} />
+      </div>
+      <button className="desktop-audio-test" onClick={() => void voice.testPlayback()}>
+        {t('测试扬声器')}
+      </button>
+      <span className="desktop-audio-feedback-state" title={voice.error || labelFor(orbVisualState)}>
+        {voice.error || labelFor(orbVisualState)}
+      </span>
+    </div>}
 
     <section className="workspace">
       {showKnowledgeLibrary && <KnowledgeLibraryPanel

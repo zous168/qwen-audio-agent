@@ -7,6 +7,8 @@ function localAcpBackend({
   args,
   sessionConfigOptions,
   coordinatorMcpInstructions = false,
+  externalMcp = true,
+  nativeSessionHistory = true,
 }) {
   return {
     id,
@@ -15,10 +17,10 @@ function localAcpBackend({
       delegation: true,
       permissions: true,
       backendUi: false,
-      nativeSessionHistory: true,
-      externalMcp: true,
+      nativeSessionHistory,
+      externalMcp,
       nativeDelegation: false,
-      sessionMcp: true,
+      sessionMcp: externalMcp,
       coordinatorMcpInstructions,
     },
     createProfile(options) {
@@ -31,7 +33,7 @@ function localAcpBackend({
           env: baseEnvironment(id),
         }),
         sessionConfigOptions: sessionConfigOptions?.(options) || [],
-        externalMcp: true,
+        externalMcp,
         nativeDelegation: false,
         backendUi: false,
       }
@@ -40,6 +42,14 @@ function localAcpBackend({
 }
 
 export const localAcpBackendDrivers = [
+  localAcpBackend({
+    id: 'cursor',
+    label: 'Cursor',
+    command: 'agent',
+    args: () => ['acp'],
+    externalMcp: false,
+    nativeSessionHistory: false,
+  }),
   localAcpBackend({
     id: 'qoder',
     label: 'Qoder',

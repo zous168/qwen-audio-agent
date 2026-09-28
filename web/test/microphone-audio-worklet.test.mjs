@@ -124,6 +124,7 @@ test('standalone processor transfers copied samples and never echoes microphone 
   let registered
   const source = await readFile(new URL('../src/realtime/microphone-audio-worklet-processor.js', import.meta.url), 'utf8')
   runInNewContext(source, {
+    sampleRate: 48000,
     AudioWorkletProcessor: class {
       constructor() {
         this.port = { postMessage: (data, transfers) => messages.push({ data, transfers }) }
@@ -137,9 +138,13 @@ test('standalone processor transfers copied samples and never echoes microphone 
   })
   assert.equal(registered.name, capture.node.name)
   const processor = new registered.Processor()
-  const input = Float32Array.from([0.25, -0.5, 0.75])
+  const input = Float32Array.from({ length: 1920 }, (_, i) => (i % 3 - 1) / 2)
   const output = new Float32Array(3).fill(1)
-  assert.equal(processor.process([[input]], [[output]]), true)
+  for (let i = 0; i < 14; i++) {
+    assert.equal(processor.process([[input.subarray(i * 128, (i + 1) * 128)]], [[output]]), true)
+    assert.equal(messages.length, 0)
+  }
+  assert.equal(processor.process([[input.subarray(1792)]], [[output]]), true)
   assert.equal(messages[0].data.type, 'samples')
   assert.notEqual(messages[0].data.samples, input.buffer)
   assert.equal(messages[0].transfers[0], messages[0].data.samples)

@@ -19,7 +19,11 @@ module.exports = async function conversationSmoke({ BrowserWindow }) {
             id: 'test', label: 'Test', modelInputModes: [], transportInputModes: [],
           })
           export const shouldClaimReleasedVoice = () => false
-          const voice = { state: 'idle', connectionState: 'connected', ownership: {}, publishClientState() {} }
+          const voice = {
+            state: 'idle', connectionState: 'connected', ownership: {},
+            audioLevels: { input: 0, output: 0 }, inputReady: true,
+            publishClientState() {}, testPlayback() {},
+          }
           export default function useRealtimeVoice({ onEvent }) {
             useEffect(() => {
               window.conversationRenderRevision = (window.conversationRenderRevision || 0) + 1
@@ -34,12 +38,17 @@ module.exports = async function conversationSmoke({ BrowserWindow }) {
       },
       transformIndexHtml() {
         return [{ tag: 'script', injectTo: 'head-prepend', children: `
-          window.fetch = async () => ({ ok: true, json: async () => ({
-            ok: true, backend: { enabled: false },
-          }) })
+          window.fetch = async (path, init = {}) => ({ ok: true, json: async () => (
+            String(path).includes('api/agent-sessions')
+              ? { agents: [], sessions: [], conversations: [{ sessionId: 'old-session', title: '之前的会话', messageCount: 2 }] }
+              : String(path).includes('api/conversations') && init.method === 'POST'
+                ? { sessionId: 'new-desktop-session' }
+                : { ok: true, backend: { enabled: false } }
+          ) })
           window.qwenAudioAgentDesktop = {
             loadSurface: async () => ({ mode: new URLSearchParams(location.search).get('surface') || 'orb' }),
             setSurface: async mode => ({ mode }),
+            setConversationSession: async id => { localStorage.setItem('test-host-session', id); return id },
             setTaskCardCount() {},
             onLifecycle: () => () => {},
             loadLifecycle: async () => ({ state: 'active' }),
@@ -119,12 +128,28 @@ module.exports = async function conversationSmoke({ BrowserWindow }) {
     await waitFor('typeof emitGatewayEvent === "function" && document.querySelector(".messages")')
     await recover()
     await waitFor(atBottom)
+    await evaluate(`document.querySelector('.desktop-new-session').click()`)
+    await waitFor('document.querySelector("[role=dialog]")')
+    await evaluate(`[...document.querySelectorAll('.session-agent-tabs button')].find(button => button.textContent === '新建会话').click()`)
+    await waitFor('document.querySelector("[role=tabpanel] input")')
+    const created = new Promise(resolve => window.webContents.once('did-finish-load', resolve))
+    await evaluate(`[...document.querySelectorAll('[role=tabpanel] button')].find(button => button.textContent === '创建并进入').click()`)
+    await created
+    await waitFor(`new URLSearchParams(location.search).get('session') === 'new-desktop-session'`)
+    await waitFor(`localStorage.getItem('test-host-session') === 'new-desktop-session'`)
+    await waitFor('document.querySelector(".messages .empty")')
     await evaluate(`(() => {
       const list = document.querySelector('.messages')
       list.scrollTop = 0
       list.dispatchEvent(new Event('scroll', { bubbles: true }))
       document.querySelector('.desktop-new-session').click()
     })()`)
+    await waitFor('document.querySelector("[role=dialog]")?.textContent.includes("之前的会话")')
+    const switched = new Promise(resolve => window.webContents.once('did-finish-load', resolve))
+    await evaluate(`[...document.querySelectorAll('.session-agent-item')].find(item => item.textContent.includes('之前的会话')).click()`)
+    await switched
+    await waitFor(`new URLSearchParams(location.search).get('session') === 'old-session'`)
+    await waitFor(`localStorage.getItem('test-host-session') === 'old-session'`)
     await waitFor('document.querySelector(".messages .empty")')
     await recover()
     await waitFor(atBottom)

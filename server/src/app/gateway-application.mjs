@@ -1,3 +1,4 @@
+import { spawnThinkingTool } from '../frontend/tools/spawn-thinking-tool.mjs'
 import { registerGatewayHttpRoutes } from './gateway-http-routes.mjs'
 import { optionalModuleFactories } from './optional-modules.mjs'
 import { OperationAudit } from '../core/operation-audit.mjs'
@@ -7,6 +8,8 @@ import { randomUUID } from 'node:crypto'
 import { resolve } from 'path'
 import { agent as defaultAgent } from '../backend/adapters/agent-client.mjs'
 import { BackendAvailability } from '../backend/availability.mjs'
+import { SessionAgentRouter } from '../backend/session-agent-router.mjs'
+import { createAgentClient } from '../backend/adapters/agent-client.mjs'
 import { BackendWorkRuntime } from '../backend/backend-work-runtime.mjs'
 import { TaskOperations } from '../orchestration/task-operations.mjs'
 import { config as defaultConfig } from '../core/config.mjs'
@@ -98,7 +101,6 @@ export function createGatewayApplication({
   publicEndpoint = undefined,
   webrtc = undefined,
 } = {}) {
-const workBackend = backendRuntime || new BackendWorkRuntime({ backend: agent })
 const sessionJournalRuntime = sessionJournal || new SessionJournalRegistry({
   directory: resolve(config.stateDirectory, 'sessions'), logger,
 })
@@ -115,6 +117,17 @@ taskManager ||= new TaskManager({
   maxTerminalTasksPerOwner: config.maxTerminalTasksPerOwner,
   scheduledTaskTimeoutMs: config.scheduledTaskTimeoutMs,
 })
+if (agent === defaultAgent && config.sessionAgentProtocols?.length) {
+  agent = new SessionAgentRouter({
+    fallback: agent,
+    protocols: config.sessionAgentProtocols,
+    backends: config.backends,
+    stateDirectory: config.stateDirectory,
+    createClient: createAgentClient,
+    taskLookup: (id, options) => taskManager.get(id, options),
+  })
+}
+const workBackend = backendRuntime || new BackendWorkRuntime({ backend: agent })
 const permissionPolicy = new PermissionPolicy({
   taskManager,
   ttlMs: config.conversationSessionTtlMs,
@@ -418,6 +431,7 @@ const frontendRuntime = createFrontendRuntime({
   taskOperations,
   backendRuntime: workBackend,
   backendAvailability,
+  backendAvailabilityForSession: agent.availabilityFor?.bind(agent),
   respondAuthorization,
   respondInput: (taskId, id, response, options) => (
     agent.respondInput(taskId, id, response, options)
@@ -430,6 +444,13 @@ const frontendRuntime = createFrontendRuntime({
   frontendKnowledge: frontendKnowledgeRuntime,
   frontendToolSources,
   spawnThinkingDescription,
+  spawnThinkingDescriptionForSession: agent.bind ? options => {
+    const binding = agent.binding(options)
+    const description = spawnThinkingDescription || spawnThinkingTool.function.description
+    return binding?.nativeSessionId
+      ? `${description} 当前后台已关联用户原来的 Codex 会话，保留原会话上下文。用户要求继续原会话、询问原会话内容或根据原会话记录处理时，调用此工具将请求交给后台。get_agent_task_status 只查询本语音系统任务，不读取原 Codex 聊天记录。`
+      : description
+  } : null,
   taskAnnouncementFactory,
   taskManager,
   conversationSync,
