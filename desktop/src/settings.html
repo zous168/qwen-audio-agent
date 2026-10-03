@@ -19,7 +19,7 @@
           </span>
           <div>
             <h1>设置</h1>
-            <p>管理语音、后台 Agent 与桌面应用</p>
+            <p>管理语音、数字人、后台 Agent 与桌面应用</p>
           </div>
         </div>
         <div class="app-meta">
@@ -57,6 +57,15 @@
             aria-controls="voice-settings"
             data-settings-tab="voice"
           >语音前台</button>
+          <button
+            id="digital-human-tab"
+            class="settings-tab"
+            type="button"
+            role="tab"
+            aria-selected="false"
+            aria-controls="digital-human-settings"
+            data-settings-tab="digital-human"
+          >数字人</button>
           <button
             id="soul-tab"
             class="settings-tab"
@@ -126,6 +135,34 @@
                 <button id="save-assistant-soul" type="button" disabled>保存 SOUL 并重连</button>
               </div>
               <p id="assistant-soul-status" role="status"></p>
+            </div>
+          </section>
+
+          <section
+            id="digital-human-settings"
+            class="settings-group"
+            role="tabpanel"
+            aria-labelledby="digital-human-tab"
+            data-settings-panel="digital-human"
+            hidden
+          >
+            <p class="setting-hint" data-remote-gateway-note hidden>数字人由远端 Gateway 配置。</p>
+            <div class="settings-card digital-human-settings-card" data-local-gateway-settings>
+              <h2>Vidu S Avatar</h2>
+              <p>配置保存到 Gateway 服务端的 config.env。API Key、RTC Token 只留在本机服务端，不会发送到 WebUI 或远端浏览器。</p>
+              <div class="setting-row"><label for="vidu-api-key">Vidu API Key</label><input id="vidu-api-key" type="password" autocomplete="off" placeholder="vda_…"></div>
+              <div class="setting-row"><label for="vidu-api-host">API 域名</label><input id="vidu-api-host" type="text" autocomplete="off" placeholder="api.vidu.cn"></div>
+              <div class="setting-row"><label for="vidu-avatar-image-uri">形象图片 URL</label><input id="vidu-avatar-image-uri" type="url" autocomplete="off" placeholder="与 Avatar ID 二选一"></div>
+              <div class="setting-row"><label for="vidu-avatar-id">Avatar ID</label><input id="vidu-avatar-id" type="text" autocomplete="off" placeholder="与图片 URL 二选一"></div>
+              <div class="setting-row"><label for="vidu-persona-id">Persona ID</label><input id="vidu-persona-id" type="text" maxlength="80" autocomplete="off" placeholder="default"></div>
+              <div class="setting-row"><label for="vidu-persona-label">显示名称</label><input id="vidu-persona-label" type="text" maxlength="80" autocomplete="off" placeholder="Vidu Avatar"></div>
+              <div class="setting-row"><label for="vidu-rtc-provider">RTC 厂商</label><select id="vidu-rtc-provider"><option value="artc">阿里 ARTC</option><option value="trtc">腾讯 TRTC</option><option value="agora">声网 Agora</option><option value="volcengine">火山 Volcengine</option></select></div>
+              <div class="setting-row"><label for="vidu-rtc-channel-id">RTC Channel ID</label><input id="vidu-rtc-channel-id" type="text" autocomplete="off"></div>
+              <div class="setting-row"><label for="vidu-rtc-user-id">RTC User ID</label><input id="vidu-rtc-user-id" type="text" autocomplete="off"></div>
+              <div class="setting-row"><label for="vidu-rtc-token">RTC Token</label><input id="vidu-rtc-token" type="password" autocomplete="off"></div>
+              <div class="setting-row"><label for="vidu-rtc-app-id">RTC App ID</label><input id="vidu-rtc-app-id" type="text" autocomplete="off"></div>
+              <div class="setting-row"><label for="vidu-rtc-bridge-module">服务端 RTC 桥</label><input id="vidu-rtc-bridge-module" type="text" autocomplete="off" placeholder="/absolute/path/to/bridge.mjs"></div>
+              <p class="setting-hint">保存后会重启 Gateway 并自动开启 WebRTC。RTC 桥模块必须导出 openViduRtcBridge()；未配置桥时保持纯语音。</p>
             </div>
           </section>
 

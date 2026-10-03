@@ -52,6 +52,18 @@ const backendCredentialRow = document.querySelector('.backend-credential-row')
 const nodePathInput = document.querySelector('#node-path')
 const applyNodePath = document.querySelector('#apply-node-path')
 const nodePathRow = document.querySelector('.node-path-row')
+const viduApiKey = document.querySelector('#vidu-api-key')
+const viduApiHost = document.querySelector('#vidu-api-host')
+const viduAvatarImageUri = document.querySelector('#vidu-avatar-image-uri')
+const viduAvatarId = document.querySelector('#vidu-avatar-id')
+const viduPersonaId = document.querySelector('#vidu-persona-id')
+const viduPersonaLabel = document.querySelector('#vidu-persona-label')
+const viduRtcProvider = document.querySelector('#vidu-rtc-provider')
+const viduRtcChannelId = document.querySelector('#vidu-rtc-channel-id')
+const viduRtcUserId = document.querySelector('#vidu-rtc-user-id')
+const viduRtcToken = document.querySelector('#vidu-rtc-token')
+const viduRtcAppId = document.querySelector('#vidu-rtc-app-id')
+const viduRtcBridgeModule = document.querySelector('#vidu-rtc-bridge-module')
 const message = document.querySelector('#message')
 const currentRealtime = document.querySelector('#current-realtime')
 const currentGateway = document.querySelector('#current-gateway')
@@ -752,6 +764,18 @@ function formSettings() {
     backendCredential: backendCredential.value,
     nodePath: nodePathInput.value.trim(),
     language: desktopLanguage.value,
+    viduApiKey: viduApiKey.value,
+    viduApiHost: viduApiHost.value,
+    viduAvatarImageUri: viduAvatarImageUri.value,
+    viduAvatarId: viduAvatarId.value,
+    viduPersonaId: viduPersonaId.value,
+    viduPersonaLabel: viduPersonaLabel.value,
+    viduRtcProvider: viduRtcProvider.value,
+    viduRtcChannelId: viduRtcChannelId.value,
+    viduRtcUserId: viduRtcUserId.value,
+    viduRtcToken: viduRtcToken.value,
+    viduRtcAppId: viduRtcAppId.value,
+    viduRtcBridgeModule: viduRtcBridgeModule.value,
   }
 }
 
@@ -770,6 +794,18 @@ function fingerprint(value) {
     backendCredential: value.backendCredential,
     nodePath: value.nodePath,
     language: value.language,
+    viduApiKey: value.viduApiKey,
+    viduApiHost: value.viduApiHost,
+    viduAvatarImageUri: value.viduAvatarImageUri,
+    viduAvatarId: value.viduAvatarId,
+    viduPersonaId: value.viduPersonaId,
+    viduPersonaLabel: value.viduPersonaLabel,
+    viduRtcProvider: value.viduRtcProvider,
+    viduRtcChannelId: value.viduRtcChannelId,
+    viduRtcUserId: value.viduRtcUserId,
+    viduRtcToken: value.viduRtcToken,
+    viduRtcAppId: value.viduRtcAppId,
+    viduRtcBridgeModule: value.viduRtcBridgeModule,
   })
 }
 
@@ -1076,6 +1112,18 @@ function render() {
   backendCredential.value = settings.backendCredential || ''
   renderBackendConnection()
   nodePathInput.value = settings.nodePath || ''
+  viduApiKey.value = settings.viduApiKey || ''
+  viduApiHost.value = settings.viduApiHost || 'api.vidu.cn'
+  viduAvatarImageUri.value = settings.viduAvatarImageUri || ''
+  viduAvatarId.value = settings.viduAvatarId || ''
+  viduPersonaId.value = settings.viduPersonaId || 'default'
+  viduPersonaLabel.value = settings.viduPersonaLabel || 'Vidu Avatar'
+  viduRtcProvider.value = settings.viduRtcProvider || 'artc'
+  viduRtcChannelId.value = settings.viduRtcChannelId || ''
+  viduRtcUserId.value = settings.viduRtcUserId || ''
+  viduRtcToken.value = settings.viduRtcToken || ''
+  viduRtcAppId.value = settings.viduRtcAppId || ''
+  viduRtcBridgeModule.value = settings.viduRtcBridgeModule || ''
   renderRuntime()
   appliedFingerprint = fingerprint(formSettings())
   updateApplyState()
@@ -1089,6 +1137,18 @@ for (const control of [
   backendUrl,
   backendCredential,
   nodePathInput,
+  viduApiKey,
+  viduApiHost,
+  viduAvatarImageUri,
+  viduAvatarId,
+  viduPersonaId,
+  viduPersonaLabel,
+  viduRtcProvider,
+  viduRtcChannelId,
+  viduRtcUserId,
+  viduRtcToken,
+  viduRtcAppId,
+  viduRtcBridgeModule,
   wakeWordEnabled,
   desktopLanguage,
 ]) {

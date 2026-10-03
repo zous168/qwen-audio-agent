@@ -82,6 +82,7 @@
     "config/frontend-agent/",
     "config/backends/openclaw/openclaw.json5",
     "examples/ai-passport/",
+    "examples/vidu-digital-human/",
     "examples/webrtc/",
     "docs/architecture/overview.md",
     "docs/architecture/overview.zh.md",

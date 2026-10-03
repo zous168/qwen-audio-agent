@@ -100,6 +100,7 @@ export function createGatewayApplication({
   gatewayAccess = null,
   publicEndpoint = undefined,
   webrtc = undefined,
+  digitalHuman = null,
 } = {}) {
 const sessionJournalRuntime = sessionJournal || new SessionJournalRegistry({
   directory: resolve(config.stateDirectory, 'sessions'), logger,
@@ -387,6 +388,7 @@ const webRtcIngress = registerGatewayHttpRoutes(app, {
   sessionJournalRuntime,
   optionalModules,
   webrtc,
+  digitalHuman,
   getGateway: () => realtimeGateway,
 })
 
@@ -442,6 +444,7 @@ const frontendRuntime = createFrontendRuntime({
   defaultRealtimeProvider: realtimeProvider,
   frontendRetrieval: retrievalRuntime,
   frontendKnowledge: frontendKnowledgeRuntime,
+  digitalHuman,
   frontendToolSources,
   spawnThinkingDescription,
   spawnThinkingDescriptionForSession: agent.bind ? options => {

@@ -143,7 +143,7 @@ export function attachGatewayClientTransport(server, {
     })
   })
 
-  const attachClient = (ws, url, identity) => {
+  const attachClient = (ws, url, identity, sessionOptions = {}) => {
     // ws emits protocol/size/socket failures as `error`, not just `close`.
     // Keep them connection-local, including failures before session.hello.
     ws.on('error', error => {
@@ -205,6 +205,7 @@ export function attachGatewayClientTransport(server, {
       send: event => send(ws, event),
       logger: connectionLogger,
       initialInputSuspension: inputArbitration?.status?.(),
+      ...sessionOptions,
       voiceAccess: {
         isActive: () => activeVoiceClients.isActive(ownerId, voiceClient),
         claim: () => {
@@ -490,14 +491,14 @@ export function attachGatewayClientTransport(server, {
 
   return {
     // Internal authenticated transport port, never a public auth bypass.
-    attachClient(connection, { identity, sessionId = 'main' }) {
+    attachClient(connection, { identity, sessionId = 'main', sessionOptions = {} }) {
       if (!identity?.ownerId) throw new TypeError('authenticated identity required')
       const url = new URL('http://localhost/api/realtime')
       url.searchParams.set('sessionId', sessionId)
       attachedClients.add(connection)
       connection.once('close', () => attachedClients.delete(connection))
       try {
-        attachClient(connection, url, identity)
+        attachClient(connection, url, identity, sessionOptions)
       } catch (error) {
         connection.close(1011, 'session initialization failed')
         throw error

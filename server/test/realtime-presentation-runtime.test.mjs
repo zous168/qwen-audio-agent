@@ -261,6 +261,16 @@ test('retires an audio response only after response, transcript and playback end
   assert.equal(runtime.has('response-1'), false)
 })
 
+test('paired avatar output defers audio.done until the rendered media drain', () => {
+  const { runtime, events } = harness()
+  const context = { turnId: 'turn-1', turnGeneration: 1 }
+  runtime.begin({ type: 'response.created', response: { id: 'response-avatar' }, __voiceContext: context })
+  runtime.handle({ type: 'response.audio.delta', response_id: 'response-avatar', delta: 'audio' }, { suppressAudio: true })
+  runtime.handle({ type: 'response.done', response: { id: 'response-avatar', status: 'completed' } }, { suppressAudioDone: true })
+  assert.equal(events.some(event => event.type === 'audio.done'), false)
+  assert.equal(events.some(event => event.type === 'audio.delta'), false)
+})
+
 test('keeps processing while a foreground tool result is pending', () => {
   const { runtime, events } = harness()
 

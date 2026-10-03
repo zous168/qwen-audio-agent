@@ -2,13 +2,14 @@
 // action result). Reassembly happens before the unchanged GCP command parser.
 export const WEBRTC_FRAME_BYTES = 64 * 1024
 export const WEBRTC_MESSAGE_BYTES = 512 * 1024
+export const GATEWAY_WEBRTC_MESSAGE_BYTES = 20 * 1024 * 1024
 const CHUNK_SIZE = 8 * 1024
 const CHUNK_TYPE = 'qwaudio.transport.chunk'
 const bytes = text => new TextEncoder().encode(text).length
 
-export function encodeWebRtcMessage(event) {
+export function encodeWebRtcMessage(event, { maxBytes = WEBRTC_MESSAGE_BYTES } = {}) {
   const text = JSON.stringify(event)
-  if (bytes(text) > WEBRTC_MESSAGE_BYTES) throw new Error('WebRTC command exceeds 512 KiB')
+  if (bytes(text) > maxBytes) throw new Error(`WebRTC command exceeds ${maxBytes / 1024} KiB`)
   if (bytes(text) <= 16 * 1024) return [text]
   const id = crypto.randomUUID()
   const total = Math.ceil(text.length / CHUNK_SIZE)
@@ -18,8 +19,8 @@ export function encodeWebRtcMessage(event) {
 }
 
 export class WebRtcMessageReader {
-  constructor({ now = Date.now, timeoutMs = 5000 } = {}) {
-    Object.assign(this, { now, timeoutMs, pending: null })
+  constructor({ now = Date.now, timeoutMs = 5000, maxBytes = WEBRTC_MESSAGE_BYTES } = {}) {
+    Object.assign(this, { now, timeoutMs, maxBytes, pending: null })
   }
   clear() { clearTimeout(this.timer); this.pending = null }
   read(raw) {
@@ -29,7 +30,7 @@ export class WebRtcMessageReader {
       if (event?.type !== CHUNK_TYPE) return raw
       const { id, index, total, data } = event
       if (typeof id !== 'string' || !id || id.length > 80 || !Number.isInteger(index)
-        || !Number.isInteger(total) || total < 2 || total > WEBRTC_MESSAGE_BYTES / CHUNK_SIZE
+        || !Number.isInteger(total) || total < 2 || total > this.maxBytes / CHUNK_SIZE
         || index < 0 || index >= total || typeof data !== 'string' || !data || data.length > CHUNK_SIZE) {
         throw new Error('Invalid WebRTC chunk')
       }
@@ -44,7 +45,7 @@ export class WebRtcMessageReader {
         throw new Error('Out-of-order or expired WebRTC chunk')
       }
       pending.size += bytes(data)
-      if (pending.size > WEBRTC_MESSAGE_BYTES) throw new Error('WebRTC command exceeds 512 KiB')
+      if (pending.size > this.maxBytes) throw new Error(`WebRTC command exceeds ${this.maxBytes / 1024} KiB`)
       pending.parts.push(data)
       if (pending.parts.length !== total) return null
       const text = pending.parts.join('')

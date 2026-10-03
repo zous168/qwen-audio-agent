@@ -2,6 +2,7 @@ import { createRequire } from 'node:module'
 import { requireWebRtcDependencies } from '../../../../shared/gateway/webrtc.mjs'
 import { PcmResampler, decodePcm, encodePcm } from './pcm.mjs'
 import { rtcError } from './config.mjs'
+import { encodeWebRtcMessage, WEBRTC_MESSAGE_BYTES, GATEWAY_WEBRTC_MESSAGE_BYTES } from '../../../../shared/gateway/webrtc-message.mjs'
 
 const requireExtension = createRequire(import.meta.url)
 let native
@@ -56,16 +57,27 @@ export function waitForIce(pc, timeoutMs = 10000) {
 }
 
 export class NativeWebRtcMedia {
-  constructor({ iceServers = [], iceTransportPolicy = 'all', video = false, inputSampleRate = 16000, loadNative = loadWebRtcNative } = {}) {
+  constructor({ iceServers = [], iceTransportPolicy = 'all', video = false, videoOutput = false, inputSampleRate = 16000, loadNative = loadWebRtcNative, gatewayProtocol = false, duplexControl = false } = {}) {
     const { rtc, sharp } = loadNative()
     this.rtc = rtc
     this.sharp = sharp
-    this.video = video
+    this.videoInput = video
+    this.videoOutput = videoOutput
     this.inputSampleRate = inputSampleRate
+    this.maxControlBytes = gatewayProtocol ? GATEWAY_WEBRTC_MESSAGE_BYTES : WEBRTC_MESSAGE_BYTES
+    this.controlQueue = []
+    this.controlBytes = 0
+    this.duplexControl = duplexControl
     this.pc = new rtc.RTCPeerConnection({ iceServers, iceTransportPolicy })
     this.source = new rtc.nonstandard.RTCAudioSource()
     this.track = this.source.createTrack()
     this.pc.addTrack(this.track)
+    if (videoOutput) {
+      if (typeof rtc.nonstandard.RTCVideoSource !== 'function') throw rtcError(503, 'video_output_unsupported', 'The WebRTC extension does not provide RTCVideoSource')
+      this.videoSource = new rtc.nonstandard.RTCVideoSource()
+      this.videoTrack = this.videoSource.createTrack()
+      this.pc.addTrack(this.videoTrack)
+    }
     this.channels = new Set()
     this.sinks = []
     this.queue = []
@@ -79,14 +91,25 @@ export class NativeWebRtcMedia {
     this.imageBusy = false
     this.audioTracks = 0
     this.videoTracks = 0
-    this.events = this.pc.createDataChannel('txt', { ordered: true })
-    this.bindChannel(this.events, true)
-    this.pc.ondatachannel = ({ channel }) => this.bindChannel(channel, false)
+    this.lastVideoAt = 0
+    // Create the gateway-to-browser channel only after the browser offer is
+    // installed.  Creating it before setRemoteDescription lets node-webrtc
+    // choose a stream id with the wrong DTLS role; Chromium then closes the
+    // channel while the ICE/DTLS connection itself still appears connected.
+    this.events = null
+    this.pc.ondatachannel = ({ channel }) => {
+      if (this.duplexControl) {
+        if (this.events || channel.label !== 'oai-events') { channel.close(); return }
+        this.events = channel
+      }
+      this.bindChannel(channel, this.duplexControl)
+    }
     this.pc.ontrack = ({ track }) => this.receiveTrack(track)
     this.pc.onconnectionstatechange = () => {
       clearTimeout(this.disconnectedTimer)
       if (['failed', 'closed'].includes(this.pc.connectionState)) this.fail('WebRTC transport closed')
       else if (this.pc.connectionState === 'disconnected') this.disconnectedTimer = setTimeout(() => this.fail('WebRTC disconnected'), 10000)
+      else if (this.pc.connectionState === 'connected') this.openEventsChannel()
     }
     this.tick = setInterval(() => this.pump(), 10)
     this.tick.unref?.()
@@ -110,12 +133,37 @@ export class NativeWebRtcMedia {
   }
 
   send(event) {
-    if (this.closed || this.events.readyState !== 'open') return
-    if (this.events.bufferedAmount > 1024 * 1024) return this.fail('slow data channel consumer')
-    try { this.events.send(JSON.stringify(event)) } catch { this.fail('data channel send failed') }
+    if (this.closed || !this.events || this.events.readyState !== 'open') return
+    try {
+      const frames = encodeWebRtcMessage(event, { maxBytes: this.maxControlBytes })
+      const bytes = frames.reduce((total, frame) => total + Buffer.byteLength(frame), 0)
+      if (this.controlBytes + this.events.bufferedAmount + bytes > this.maxControlBytes + 1024 * 1024) throw new Error('slow data channel consumer')
+      this.controlBytes += bytes
+      this.controlQueue.push(...frames)
+      this.flushControl()
+    } catch { this.fail('data channel send failed') }
   }
 
-  connected() { return !this.closed && this.pc.connectionState === 'connected' && this.events.readyState === 'open' }
+  flushControl() {
+    try {
+      while (this.controlQueue.length && this.events?.readyState === 'open' && this.events.bufferedAmount < 256 * 1024) {
+        const frame = this.controlQueue.shift()
+        this.controlBytes -= Buffer.byteLength(frame)
+        this.events.send(frame)
+      }
+    } catch { this.fail('data channel send failed') }
+  }
+
+  connected() { return !this.closed && this.pc.connectionState === 'connected' && this.events?.readyState === 'open' }
+
+  openEventsChannel() {
+    if (this.duplexControl || this.events || this.closed) return
+    // Chromium uses an offerer-created channel on the adjacent stream id;
+    // an explicit id keeps the answerer's channel deterministic across the
+    // audio-only and audio+video SDP shapes supported by this gateway.
+    this.events = this.pc.createDataChannel('txt', { ordered: true, id: 1 })
+    this.bindChannel(this.events, true)
+  }
 
   async answer(sdp) {
     await this.pc.setRemoteDescription({ type: 'offer', sdp })
@@ -133,13 +181,17 @@ export class NativeWebRtcMedia {
       sink.ondata = data => {
         if (this.closed) return
         try {
-          if (data.bitsPerSample !== 16) throw new Error('PCM16 input required')
+          // RTCAudioSink's payload is PCM16. Some Windows native builds emit
+          // an invalid bitsPerSample number; validate the actual buffer type
+          // instead of rejecting valid Int16Array samples on that metadata.
+          if (!(data.samples instanceof Int16Array)) throw new Error('PCM16 input required')
+          if (data.numberOfFrames !== undefined && data.samples.length !== data.numberOfFrames * data.channelCount) throw new Error('invalid PCM frame length')
           if (!converter || converter.from !== data.sampleRate || converter.to !== this.inputSampleRate) converter = new PcmResampler(data.sampleRate, this.inputSampleRate)
           const converted = converter.push(data.samples, data.channelCount)
           if (converted.length) this.onAudio?.(encodePcm(converted))
-        } catch { this.fail('invalid incoming audio') }
+        } catch (error) { this.fail(`invalid incoming audio (${data.sampleRate} Hz, ${data.bitsPerSample} bit, ${data.channelCount} channels): ${error.message}`) }
       }
-    } else if (track.kind === 'video' && this.video && this.videoTracks++ === 0) {
+    } else if (track.kind === 'video' && this.videoInput && this.videoTracks++ === 0) {
       const sink = new this.rtc.nonstandard.RTCVideoSink(track)
       this.sinks.push(sink)
       sink.onframe = ({ frame }) => {
@@ -203,8 +255,25 @@ export class NativeWebRtcMedia {
     } catch { this.fail('output queue full') }
   }
 
+  video({ data, width, height, format = 'I420', responseId } = {}) {
+    if (this.closed || !this.videoOutput || !this.videoSource) return
+    if (responseId && this.blocked.has(responseId)) return
+    if (format !== 'I420') throw new Error('video output requires I420 frames')
+    if (!Number.isInteger(width) || !Number.isInteger(height) || width < 2 || height < 2 || width > 1920 || height > 1080 || width % 2 || height % 2) {
+      throw new Error('invalid video dimensions')
+    }
+    const bytes = Buffer.from(data || [])
+    const expected = width * height * 3 / 2
+    if (bytes.byteLength !== expected) throw new Error('invalid I420 frame size')
+    const now = Date.now()
+    if (now - this.lastVideoAt < 15) return
+    this.lastVideoAt = now
+    this.videoSource.onFrame({ width, height, data: bytes })
+  }
+
   pump() {
     if (!this.connected()) return
+    this.flushControl()
     const samples = new Int16Array(480)
     let filled = 0
     let drained
@@ -234,7 +303,16 @@ export class NativeWebRtcMedia {
     } catch { this.fail('audio sender failed') }
   }
 
-  clear() {
+  clear(responseId) {
+    if (responseId) {
+      this.blocked.add(responseId)
+      this.known.delete(responseId)
+      this.responses.delete(responseId)
+      this.queue = this.queue.filter(entry => entry.responseId !== responseId)
+      this.queuedSamples = this.queue.reduce((total, entry) => total + (entry.samples ? entry.samples.length - entry.offset : 0), 0)
+      while (this.blocked.size > 128) this.blocked.delete(this.blocked.values().next().value)
+      return
+    }
     for (const responseId of this.known) this.blocked.add(responseId)
     while (this.blocked.size > 128) this.blocked.delete(this.blocked.values().next().value)
     this.known.clear()
@@ -247,18 +325,21 @@ export class NativeWebRtcMedia {
     if (this.closed || this.failing) return
     this.failing = true
     this.send({ type: 'error', error: { code: 'media_failed', message } })
-    this.onClose?.()
+    this.onClose?.(message)
     this.close()
   }
 
   close() {
     if (this.closed) return
     this.closed = true
+    this.controlQueue = []
+    this.controlBytes = 0
     clearInterval(this.tick)
     clearTimeout(this.disconnectedTimer)
     this.clear()
     for (const sink of this.sinks) sink.stop()
     this.track.stop()
+    this.videoTrack?.stop()
     for (const channel of this.channels) channel.close()
     this.pc.close()
   }

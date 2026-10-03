@@ -2,9 +2,10 @@
 
 [English](README.md) | [中文](README_ZH.md)
 
-Status: a recorded demo is available below. The integration design remains a
-proposal; this directory does not yet provide runnable code or installation
-scripts. Design baseline: Gateway WebRTC PR #465, main commit `9ad6348f`.
+Status: the OpenAvatarChat/FlashHead route remains a design proposal. The Vidu S
+component route has a runnable gateway integration skeleton in the adjacent
+example; this directory does not bundle a GPU Renderer or vendor SDK. Design
+baseline: Gateway WebRTC PR #465, main commit `9ad6348f`.
 
 ## Demo
 
@@ -29,8 +30,10 @@ SoulX-FlashHead Lite in an independent Python GPU service. LiveAvatar Avatar Onl
 2. [Provider contract and concrete mappings](docs/provider-contract.zh.md)
 3. [OpenAvatarChat implementation plan and acceptance](docs/implementation-plan.zh.md)
 
-All three documents are proposals, not implemented framework APIs. Other design
-files in this directory are historical context and are superseded by this set.
+The provider-neutral contract and orchestrator are implemented in
+`server/src/voice/digital-human/`; the OpenAvatarChat Renderer described here is
+still pending. Other design files in this directory are historical context and
+are superseded by this set.
 
 ## Dependency boundary
 

@@ -33,10 +33,18 @@ async function browserFor(t, base) {
   return { page, errors }
 }
 
-async function connect(page, video = false) {
+async function connect(page, video = false, harness) {
   await page.locator('#camera').setChecked(video)
   await page.locator('#connect').click()
-  await page.waitForFunction(() => document.getElementById('status').textContent === '可以说话了', null, { timeout: 15000 })
+  try {
+    // Configuration fetch and the transport's own connection deadline can
+    // exceed 15 s on hosts with several ICE interfaces. Observe that deadline.
+    await page.waitForFunction(() => document.getElementById('status').textContent === '可以说话了', null, { timeout: 35000 })
+  } catch (error) {
+    const diagnostic = await page.evaluate(() => ({ status: document.getElementById('status').textContent, log: document.getElementById('log').textContent.split('\n').slice(-8).join('\n'), peers: window.testPeers.map(peer => ({ connection: peer.connectionState, ice: peer.iceConnectionState, gathering: peer.iceGatheringState })) }))
+    diagnostic.media = harness?.media.map(media => ({ failure: media.failure?.message, code: media.failure?.code, closed: media.closed, online: media.online }))
+    throw new Error(`${error.message}\nWebRTC: ${JSON.stringify(diagnostic)}`)
+  }
 }
 
 for (const video of [false, true]) {
@@ -44,7 +52,7 @@ for (const video of [false, true]) {
     const h = await rtcHarness(t, { video, realMedia: true })
     const { page, errors } = await browserFor(t, h.base)
     for (let cycle = 0; cycle < 3; cycle++) {
-      await connect(page, video)
+      await connect(page, video, h)
       const frontend = h.frontends.at(-1)
       await waitUntil(() => frontend.audio.some(audio => decodePcm(audio).some(value => Math.abs(value) > 100)), 10000)
       if (video) {

@@ -2,7 +2,7 @@
 
 状态：待评审。日期：2026-09-18。框架基线：GitHub `main`，`9ad6348f`（PR #465）。
 
-本文与 [Provider 契约](provider-contract.zh.md)、[开发计划](implementation-plan.zh.md) 共同构成开发交接；所有新增接口均为拟议接口，尚未实现。
+本文与 [Provider 契约](provider-contract.zh.md)、[开发计划](implementation-plan.zh.md) 共同构成 OpenAvatarChat/FlashHead 路线的设计交接。Provider 契约和编排器的首版无厂商实现已落在 `server/src/voice/digital-human/`；本文件中的 GPU Renderer 仍是后续工作。
 
 ## 1. 目标与非目标
 
@@ -29,7 +29,7 @@
 | 每连接独立媒体子进程 | 可注入的媒体输入适配器和受控私有媒体连接 |
 | 生成完成、发送排空、播放回执分离 | 视频时间轴、取消代次、可验证的播放边界 |
 
-现有 `session.update` 不支持数字人字段，也没有公共 Avatar Provider SPI。不能只安装一个 example 就宣称这些能力已经存在。
+现有 `session.update` 仍不承载数字人字段；数字人模式通过 WebRTC persona 选择和服务端内部编排器接入。公共 Avatar Provider 契约与首版编排器已经落在 `server/src/voice/digital-human/`，OpenAvatarChat Renderer 本身仍未随仓库交付。
 
 实现定位参考：`voice/realtime-presentation-runtime.mjs`、`voice/realtime-session-runtime.mjs`、`transport/gateway-client-transport.mjs`、`transport/webrtc/{routes,protocol,media,media-process,media-worker}.mjs`。这些模块的职责可复用，不能把厂商逻辑直接塞进其中。
 

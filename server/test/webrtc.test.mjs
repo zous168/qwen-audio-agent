@@ -102,6 +102,42 @@ test('auth, content-type, SDP, model and video are checked before allocation', a
   assert.equal(h.media.length, 0)
 })
 
+test('digital human config advertises personas and reserves a recvonly video track', async t => {
+  const digitalHuman = {
+    available: true,
+    personas: () => [{ id: 'avatar-1', label: 'Avatar 1' }],
+    resolvePersona: id => id === 'avatar-1' ? { id, label: 'Avatar 1' } : null,
+    format: { encoding: 'pcm_s16le', sampleRate: 24000, channels: 1 },
+    providerFactory: async () => ({ openSession: async () => ({ close() {} }) }),
+  }
+  const h = await rtcHarness(t, { digitalHuman })
+  const config = await fetch(`${h.base}/api/v1/webrtc/config`, { headers: h.headers })
+  assert.equal(config.status, 200)
+  const payload = await config.json()
+  assert.deepEqual(payload.digital_human.personas, [{ id: 'avatar-1', label: 'Avatar 1' }])
+  assert.equal(Object.hasOwn(payload, 'vidu_api_key'), false)
+  assert.equal(Object.hasOwn(payload.digital_human, 'api_key'), false)
+  assert.equal(Object.hasOwn(payload.digital_human, 'rtc_token'), false)
+  assert.equal((await h.offer(OFFER, '?avatarPersonaId=avatar-1')).status, 400)
+  const response = await h.offer(`${OFFER}m=video 9 UDP/TLS/RTP/SAVPF 96\r\n`, '?avatarPersonaId=avatar-1')
+  assert.equal(response.status, 200)
+  assert.equal(h.media[0].videoOutput, true)
+})
+
+test('Omni input reuses its video transceiver for digital human output', async t => {
+  const digitalHuman = {
+    available: true,
+    personas: () => [{ id: 'avatar-1', label: 'Avatar 1' }],
+    resolvePersona: id => id === 'avatar-1' ? { id, label: 'Avatar 1' } : null,
+    format: { encoding: 'pcm_s16le', sampleRate: 24000, channels: 1 },
+    providerFactory: async () => ({ openSession: async () => ({ close() {} }) }),
+  }
+  const h = await rtcHarness(t, { video: true, digitalHuman })
+  const response = await h.offer(`${OFFER}m=video 9 UDP/TLS/RTP/SAVPF 96\r\n`, '?avatarPersonaId=avatar-1')
+  assert.equal(response.status, 200)
+  assert.equal(h.media[0].videoOutput, true)
+})
+
 for (const video of [false, true]) {
   test(`${video ? 'Omni' : 'Audio'} ingress reuses voice, text, output and playback session paths`, async t => {
     const h = await rtcHarness(t, { video })

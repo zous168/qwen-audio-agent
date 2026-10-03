@@ -141,7 +141,8 @@ test('installs to every backend installer agent explicitly', () => {
   assert.ok(agents.includes('openclaw'))
   assert.ok(agents.includes('pi'))
   // deepseek 暂无 skills.sh 安装器（经 ~/.agents/skills 被动受益）。
-  assert.equal(agents.length, 10)
+  // 当前 catalog 还包含 Codex，因此专属安装器共 11 个。
+  assert.equal(agents.length, 11)
 
   // 传入 agents 时只装给指定后台（“本机存在 ∪ 当前”名单）。
   const narrowed = fakeSpawn({ stdout: 'installed\n' })

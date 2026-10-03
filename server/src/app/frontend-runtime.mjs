@@ -28,6 +28,7 @@ export function createFrontendRuntime({
   frontendRetrieval = null, frontendKnowledge = null,
   spawnThinkingDescription = '',
   spawnThinkingDescriptionForSession = null,
+  digitalHuman = null,
 } = {}) {
   const observers = new SessionObservers(sessionObservers)
   const sessions = new Set()
@@ -45,7 +46,7 @@ export function createFrontendRuntime({
     frontendToolSourcesReady, observers, memoryService, sessionDigests, notesStore,
     taskOperations, backendRuntime, backendAvailability,
     respondAuthorization, respondInput, permissionPolicy, realtimeFrontendFactory,
-    frontendRetrieval, frontendKnowledge, spawnThinkingDescription,
+    frontendRetrieval, frontendKnowledge, spawnThinkingDescription, digitalHuman,
   }
 
   return {

@@ -95,6 +95,7 @@ import {
 import { createGracefulShutdown } from './graceful-shutdown.mjs'
 import { DesktopPresence } from './desktop-presence.mjs'
 import { createElectronGatewayCredentialStore } from './gateway-credential-store.mjs'
+import { VIDU_SETTING_FIELDS } from '../../shared/digital-human-settings.mjs'
 
 // Gateway paths belong to the Gateway; Electron's userData holds only client
 // preferences, credentials, presentation assets and local caches.
@@ -177,13 +178,17 @@ const desktopText = (text, params) => desktopTranslator(
 )(text, params)
 let configuredGatewayOrigin = validateAppUrl(initialSettings.gatewayUrl)
 let appOrigin = configuredGatewayOrigin
-let setupRequired = (
+const initialSetupRequired = (
   !configExistedAtLaunch
   || (
     isLoopbackUrl(configuredGatewayOrigin)
     && !realtimeSettingsConfigured(initialSettings)
   )
 )
+// Use the Gateway's existing development preview flag for both product
+// surfaces. The Desktop still owns the child process and settings restarts.
+const unconfiguredPreview = process.env.QWEN_AUDIO_ALLOW_UNCONFIGURED === '1'
+let setupRequired = initialSetupRequired && !unconfiguredPreview
 const preloadPath = resolve(here, 'preload.cjs')
 
 let mainWindow = null
@@ -1090,12 +1095,16 @@ async function applyDesktopSettings(settings) {
     previous.wakeWordEnabled !== normalized.wakeWordEnabled
   )
   const languageChanged = previous.language !== normalized.language
+  const digitalHumanChanged = VIDU_SETTING_FIELDS.some(([field]) => (
+    previous[field] !== normalized[field]
+  ))
   const gatewayRuntimeChanged = (
     gatewayChanged
     || realtimeChanged
     || backendChanged
     || backendModelChanged
     || backendConnectionChanged
+    || digitalHumanChanged
   )
   if (!remote && nextOrigin === borrowedGatewayOrigin && gatewayRuntimeChanged) {
     const borrowedHealth = await readDesktopGatewayHealth(borrowedGatewayOrigin)
@@ -1347,6 +1356,7 @@ if (!app.requestSingleInstanceLock()) {
     } else {
       try {
         await startConfiguredRuntime(startupSettings)
+        if (initialSetupRequired && unconfiguredPreview) showSettings()
       } catch (error) {
         lastRuntimeError = error?.message || String(error)
         setupRequired = true

@@ -102,6 +102,7 @@ WebUI 的登录状态、语言和会话标识由浏览器 Cookie / 本地存储�
 | 我要配置 | 文档 |
 | --- | --- |
 | 语音模型、服务地址和凭据 | [语音前台](configuration/frontend.zh.md) |
+| Vidu S Avatar 数字人、RTC 桥与服务端密钥 | [Vidu 接入说明](../examples/vidu-digital-human/docs/integration-guide.zh.md) |
 | 后台选择、安装、模型与权限 | [后台设置](configuration/backend.zh.md) |
 | 联网搜索 | [搜索服务](guides/web-search.zh.md) |
 | 用户文档与知识检索 | [资料库](guides/knowledge.zh.md) |

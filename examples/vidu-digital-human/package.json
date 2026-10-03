@@ -1,0 +1,15 @@
+{
+  "name": "@qwen-audio-agent/example-vidu-digital-human",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Vidu S Avatar Component bridge for qwen-audio-agent (assistant audio + transcripts → Vidu RTC)",
+  "scripts": {
+    "preflight": "node bootstrap/preflight.mjs",
+    "start": "node bootstrap/start.mjs",
+    "test": "node --test test/*.test.mjs"
+  },
+  "dependencies": {
+    "ws": "^8.21.3"
+  }
+}

@@ -27,6 +27,7 @@ import { ClientActionName, ClientActionPort } from '../client/client-action-port
 import { PresenceController } from '../client/presence-controller.mjs'
 import { ClientToolSource } from '../frontend/tools/client-tool-source.mjs'
 import { frontendToolRegistry } from '../frontend/frontend-tools.mjs'
+import { DigitalHumanOrchestrator } from './digital-human/orchestrator.mjs'
 
 const MAX_PENDING_AUDIO_CHUNKS = 30
 const RESPONSE_START_WATCHDOG_MS = 12000
@@ -65,6 +66,7 @@ export function createRealtimeSessionRuntime({
   defaultRealtimeProvider, realtimeFrontendFactory,
   frontendRetrieval, frontendKnowledge, frontendToolSources,
   spawnThinkingDescription, taskAnnouncementFactory,
+  digitalHuman = null, digitalHumanSession = null, mediaOutput = null,
 }) {
   let closed = false
   let started = false
@@ -120,6 +122,7 @@ export function createRealtimeSessionRuntime({
   const transcripts = new TurnTranscripts()
   const turnCitations = new TurnCitations()
   let realtimeSession
+  let digitalHumanOrchestrator = null
   let visualInput
   const clearVisualInput = () => {
     realtimeSession?.clearPendingImage?.()
@@ -253,6 +256,7 @@ export function createRealtimeSessionRuntime({
       clearVisualInput()
       clearResponseCandidate()
       announcementWindow.reset()
+      void digitalHumanOrchestrator?.interrupt('transport_lost')
       emit({
         type: GatewayServerEvent.VOICE_STATE,
         state: 'idle',
@@ -329,6 +333,7 @@ export function createRealtimeSessionRuntime({
     const result = voiceAccess.claim()
     inputEnabled = result.granted && enableInput
     outputEnabled = result.granted && enableOutput
+    if (outputEnabled) void digitalHumanOrchestrator?.open().catch(() => {})
     voiceAccess.changed()
     return result.granted
   }
@@ -550,12 +555,40 @@ export function createRealtimeSessionRuntime({
     turnCitations,
   })
 
+  if (digitalHuman?.providerFactory && digitalHumanSession?.enabled === true) {
+    digitalHumanOrchestrator = new DigitalHumanOrchestrator({
+      providerFactory: context => digitalHuman.providerFactory({
+        ...context,
+        ownerId,
+        sessionId,
+        personaId: digitalHumanSession.personaId,
+      }),
+      persona: digitalHumanSession.persona,
+      format: digitalHuman.format,
+      mediaOutput,
+      send: event => emit(event),
+      canPresent: () => !closed && !sleeping && outputEnabled && voiceAccess.isActive(),
+      logger: connectionLogger,
+      firstMediaTimeoutMs: digitalHuman.firstMediaTimeoutMs,
+    })
+    digitalHumanOrchestrator.on('provider.error', error => {
+      connectionLogger.warn('digital_human.provider_error', {
+        code: error.code,
+        error: error.message,
+      })
+    })
+  }
+
   taskCoordinator.start()
 
   const handleEvent = event => {
     if (closed) return
     if (isSleepActivityEvent(event)) sleepController?.recordActivity()
     if (isResponseActivityEvent(event)) presentationRuntime.begin(event)
+    const digitalHumanContext = isResponseActivityEvent(event)
+      ? presentationRuntime.get(realtimeResponseId(event))
+      : null
+    const digitalHumanResult = digitalHumanOrchestrator?.handleProviderEvent(event, digitalHumanContext)
     if (inputs.handleProviderEvent(event)) return
     if (event.type === 'response.done') {
       const responseId = realtimeResponseId(event)
@@ -600,7 +633,7 @@ export function createRealtimeSessionRuntime({
           emit({ type: 'error', message: error.message })
         })
         .finally(() => toolCallTimings.delete(callFields.callId))
-    } else if (presentationRuntime.handle(event)) {
+    } else if (presentationRuntime.handle(event, digitalHumanResult || {})) {
       // Alternative transports distinguish generation from audio delivery.
       // Existing client events stay unchanged.
       if (event.type === 'response.done') {
@@ -645,6 +678,7 @@ export function createRealtimeSessionRuntime({
         const generation = ++contentRecoveryGeneration
         const canRecover = realtimeRecoveryContext.beginRecovery(failedContext, recentMessages)
         clearResponseCandidate()
+        void digitalHumanOrchestrator?.interrupt('content_safety')
         presentationRuntime.failResponse(event)
         emit({
           type: GatewayServerEvent.PLAYBACK_CLEAR,
@@ -743,6 +777,7 @@ export function createRealtimeSessionRuntime({
     if (sleeping) return
     clearVisualInput()
     sleeping = true
+    void digitalHumanOrchestrator?.interrupt('permission_revoked')
     waking = false
     announcementWindow.reset()
     progressAnnouncements.clear()
@@ -1066,6 +1101,7 @@ export function createRealtimeSessionRuntime({
       turns.advanceBoundary()
       announcementWindow.interrupt()
       announcements.dismissActive()
+      void digitalHumanOrchestrator?.interrupt('user_interruption')
       realtimeSession.cancelResponse()
     } else if (event.type === GatewayClientEvent.PLAYBACK_STARTED) {
       const id = String(event.responseId || '')
@@ -1117,6 +1153,7 @@ export function createRealtimeSessionRuntime({
       announcementWindow.reset()
       progressAnnouncements.clear()
       realtimeSession.close({ notifyDisconnected: true })
+      void digitalHumanOrchestrator?.interrupt('permission_revoked')
     } else if (event.type === GatewayClientEvent.INPUT_MUTE) {
       inputEnabled = false
       realtimeSession.clearPendingAudio()
@@ -1187,6 +1224,7 @@ export function createRealtimeSessionRuntime({
       presenceController.close()
       clientTools.close()
       realtimeSession.close()
+      void digitalHumanOrchestrator?.close()
       observeSessionAudio({ type: 'session_ended' })
       observers.emit('onSessionClosed', { ownerId, sessionId, logger: connectionLogger })
     },

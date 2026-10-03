@@ -18,6 +18,11 @@ import {
   migrateRealtimeFileEnvironment, realtimeRuntimeEnvironment, realtimeSettingsValues, realtimeSettingsFromEnvironment, mergeRealtimeEnvironment,
 } from '../../shared/realtime-provider-definitions.mjs'
 import { normalizeDesktopLanguage } from './i18n.mjs'
+import {
+  VIDU_SETTING_FIELDS,
+  normalizeViduSettings,
+  viduSettingsFromEnvironment,
+} from '../../shared/digital-human-settings.mjs'
 
 const DEFAULTS = {
   gatewayUrl: 'http://127.0.0.1:3101',
@@ -34,6 +39,7 @@ const DEFAULTS = {
   backendCredential: '',
   nodePath: '',
   language: 'auto',
+  ...normalizeViduSettings(),
 }
 
 const CLIENT_SETTING_KEYS = {
@@ -59,6 +65,7 @@ const SETTING_KEYS = {
   backendModel: 'QWEN_AUDIO_AGENT_BACKEND_MODEL',
   backendOwnership: 'QWEN_AUDIO_AGENT_BACKEND_OWNERSHIP',
   nodePath: 'QWEN_AUDIO_AGENT_NODE_PATH',
+  ...Object.fromEntries(VIDU_SETTING_FIELDS),
 }
 
 function configured(values, key, fallback) {
@@ -293,6 +300,7 @@ export function parseSettings(content = '', fallback = {}, realtimeDrafts = {}) 
       'QWEN_AUDIO_DESKTOP_LANGUAGE',
       fallback.QWEN_AUDIO_DESKTOP_LANGUAGE || DEFAULTS.language,
     )),
+    ...viduSettingsFromEnvironment(values, fallback),
   }
 }
 
@@ -350,6 +358,7 @@ export function normalizeSettings(settings = {}) {
       settings.nodePath ?? DEFAULTS.nodePath,
     ).trim(),
     language: normalizeDesktopLanguage(settings.language),
+    ...normalizeViduSettings(settings),
   }
 }
 

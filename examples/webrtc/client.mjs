@@ -30,6 +30,8 @@ function controls() {
   $('interrupt').disabled = !ready || busy
   $('mute').disabled = !ready || busy
   $('camera').disabled = !configuration?.video_input || busy
+  $('avatar-persona').disabled = Boolean(active) || busy || !configuration?.digital_human?.available
+  $('avatar-picker').hidden = !configuration?.digital_human?.available
   $('new-session').disabled = busy
   $('session').disabled = Boolean(active) || busy
   $('token').disabled = Boolean(active) || busy
@@ -87,6 +89,16 @@ async function loadConfiguration() {
   const result = await response.json()
   if (!response.ok) throw new Error(result.error?.message || '无法读取网关配置，请检查访问凭证')
   configuration = result
+  const picker = $('avatar-persona')
+  const previousPersona = picker.value
+  picker.replaceChildren(new Option('关闭', ''))
+  for (const persona of result.digital_human?.personas || []) {
+    const option = new Option(persona.label || persona.id, persona.id)
+    picker.append(option)
+  }
+  picker.value = (result.digital_human?.personas || []).some(item => item.id === previousPersona)
+    ? previousPersona
+    : ''
   $('model').textContent = result.model
   $('model-label').textContent = result.video_input ? 'Qwen Omni' : 'Qwen Audio'
   $('model-capabilities').textContent = result.video_input ? 'Text · Audio · Video' : 'Text · Audio'
@@ -110,6 +122,8 @@ async function disconnect() {
     await current.close()
     $('preview').srcObject = null
     $('camera-panel').hidden = true
+    $('avatar-panel').hidden = true
+    $('avatar').srcObject = null
     $('ack').disabled = true
     $('elapsed').textContent = '00:00'
     $('app').style.setProperty('--level', 0)
@@ -144,6 +158,12 @@ function received(current, event) {
   }
   if (event.type === 'response.done' && event.response?.status === 'failed') notice('本次模型回复失败，请查看连接详情或重试。')
   if (event.type === 'error') notice(event.error?.message || '网关返回错误，请查看连接详情')
+  if (event.type === 'qwaudio.event' && event.event?.type === 'digital_human.state') {
+    const item = event.event
+    if (item.state === 'rendering') state('speaking', '数字人正在说话')
+    else if (item.state === 'audio_only') notice(item.error?.message || '数字人暂不可用，已切换为纯语音')
+    else if (item.state === 'error') notice(item.error?.message || '数字人渲染失败')
+  }
   if (event.type === 'qwaudio.event') {
     const item = event.event
     if (item.type === 'conversation.history.result') {
@@ -186,7 +206,9 @@ function meter(current) {
 async function connect() {
   if (active || closing || connecting) return
   const auth = headers()
+  const avatarPersonaId = $('avatar-persona').value.trim()
   const current = new BrowserWebRtcConnection({ sessionId: $('session').value.trim(), takeover: $('takeover').checked,
+    avatarPersonaId, video: $('avatar'),
     audio: $('remote'),
     fetch: (url, init = {}) => fetch(url, { ...init, headers: { ...auth, ...init.headers } }),
     onEvent: event => received(current, event),
@@ -223,6 +245,7 @@ async function connect() {
       $('preview').srcObject = camera
     }
     $('camera-panel').hidden = !current.camera
+    $('avatar-panel').hidden = !avatarPersonaId
     current.meter = setInterval(() => { if (active === current) meter(current) }, 50)
   } catch (error) {
     if (active === current) {
@@ -245,6 +268,7 @@ $('mute').onclick = () => {
   listening()
 }
 $('camera').onchange = async () => { if (active) { await disconnect(); await connect() } }
+$('avatar-persona').onchange = async () => { if (active) { await disconnect(); await connect() } }
 $('settings-toggle').onclick = () => {
   $('settings-panel').hidden = !$('settings-panel').hidden
   $('settings-toggle').setAttribute('aria-expanded', String(!$('settings-panel').hidden))

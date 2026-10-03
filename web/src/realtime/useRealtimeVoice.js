@@ -16,6 +16,7 @@ import {
   GatewayClientProtocolEvent,
 } from '../../../shared/protocol/gateway-client-protocol.mjs'
 import { GatewayClient } from '../../../shared/gateway/client-sdk.mjs'
+import { GatewayWebRtcSocket } from '../../../shared/gateway/webrtc-socket.mjs'
 import { gatewayReferenceClientCapabilities } from '../../../shared/gateway/client-profiles.mjs'
 import {
   audioSchedulingLeadSeconds,
@@ -34,6 +35,7 @@ import { confirmTrackedPlaybackStart } from './playback-lifecycle.js'
 import { t } from '../i18n.js'
 import {
   createGatewayWebSocket,
+  gatewayFetch,
   gatewayRealtimeUrl,
   gatewayTransportIsRemote,
 } from '../gateway-transport.js'
@@ -229,7 +231,15 @@ export default function useRealtimeVoice({
   onClientAction,
   additionalCapabilities = [],
   onWakeWordAudio,
+  avatarPersonaId = '',
 }) {
+  const [avatarState, setAvatarState] = useState('off')
+  const [avatarStream, setAvatarStream] = useState(null)
+  const [rtcFailure, setRtcFailure] = useState('')
+  const [avatarAttempt, setAvatarAttempt] = useState(0)
+  const rtcRef = useRef(null)
+  const activeAvatarId = rtcFailure ? '' : avatarPersonaId
+  useEffect(() => { setRtcFailure('') }, [avatarPersonaId, avatarAttempt])
   const [clientState, dispatchClientState] = useReducer(
     reduceGatewayClientState,
     undefined,
@@ -297,7 +307,7 @@ export default function useRealtimeVoice({
   wakeWordAudioRef.current = onWakeWordAudio
   wakeWordOnlyRef.current = wakeWordOnly
   enabledRef.current = enabled
-  outputMutedRef.current = outputMuted
+  outputMutedRef.current = outputMuted || suspended
 
   const releaseManualInputGuard = useCallback(() => {
     manualInputPendingRef.current = false
@@ -314,6 +324,7 @@ export default function useRealtimeVoice({
   }, [releaseManualInputGuard])
 
   const activateAudio = useCallback(() => {
+    rtcRef.current?.connection.activateAudio().catch(reason => setError(reason.message))
     const AudioContext = window.AudioContext || window.webkitAudioContext
     if (!AudioContext) {
       setError(t('当前浏览器不支持实时语音播放'))
@@ -369,6 +380,7 @@ export default function useRealtimeVoice({
       const input = enabled && inputReady && recentInput
         ? inputMeterRef.current.level : 0
       let output = 0
+      if (rtcRef.current) output = Math.min(1, rtcRef.current.connection.outputLevel() * 10)
       if (outputAnalyserRef.current && audioRef.current?.state === 'running') {
         outputAnalyserRef.current.getFloatTimeDomainData(outputSamples)
         output = audioLevel(outputSamples)
@@ -440,6 +452,7 @@ export default function useRealtimeVoice({
   }, [sendSocketEvent])
 
   const stopPlayback = useCallback((reason = '') => {
+    rtcRef.current?.connection.clearPlayback()
     const playback = playbackRef.current
     const activeResponseIds = new Set([
       ...playback.startTimers.keys(),
@@ -713,7 +726,11 @@ export default function useRealtimeVoice({
 
   useEffect(() => {
     const mutedResponses = mutedPlaybackResponses.current
+    let disposed = false
+    setAvatarState(activeAvatarId ? 'starting' : rtcFailure ? 'audio_only' : 'off')
     const handleEvent = event => {
+      if (disposed) return
+      if (event.type === 'digital_human.state') setAvatarState(event.state)
       dispatchClientState(event)
       if (event.type === GatewayServerEvent.VOICE_READY) environmentState.setReady(true)
       if (event.type === GatewayServerEvent.VOICE_CONNECTION && event.state !== 'connected') {
@@ -766,7 +783,7 @@ export default function useRealtimeVoice({
           play(event.audio, event.sampleRate, event.responseId)
         }
       }
-      if (event.type === GatewayServerEvent.AUDIO_DONE) {
+      if (event.type === GatewayServerEvent.AUDIO_DONE && !rtcRef.current) {
         if (mutedPlaybackResponses.current.has(event.responseId)) {
           finishMutedAudio(event.responseId)
         } else {
@@ -778,7 +795,21 @@ export default function useRealtimeVoice({
     }
     const client = new GatewayClient({
       url: gatewayRealtimeUrl(sessionId),
-      createSocket: createGatewayWebSocket,
+      createSocket: activeAvatarId ? () => {
+        const socket = new GatewayWebRtcSocket({
+          sessionId, fetch: gatewayFetch, avatarPersonaId: activeAvatarId,
+          onVideoStream: stream => { if (!disposed) setAvatarStream(stream) },
+          onError: error => {
+            if (disposed) return
+            if (error.code === 'playback_blocked') setError(t('点击麦克风或发送消息以启用声音'))
+            else setRtcFailure(error.message || 'webrtc_unavailable')
+          },
+        })
+        rtcRef.current = socket
+        socket.connection.setOutputMuted(outputMutedRef.current)
+        return socket
+      } : createGatewayWebSocket,
+      connectTimeoutMs: activeAvatarId ? 45000 : 10000,
       clientType,
       clientLabel,
       clientInstanceId: clientInstanceId.current,
@@ -891,15 +922,20 @@ export default function useRealtimeVoice({
     client.start()
 
     return () => {
+      disposed = true
       environmentState.setReady(false)
       stopPlayback('connection_closed')
       client.stop()
+      rtcRef.current = null
+      setAvatarStream(null)
       socketRef.current = null
       setImageBufferAvailable(false)
       mutedResponses.clear()
       releaseManualInputGuard()
     }
   }, [
+    activeAvatarId,
+    rtcFailure,
     additionalCapabilitiesSignature,
     clientToolsSignature,
     publishPresence,
@@ -920,8 +956,9 @@ export default function useRealtimeVoice({
   ])
 
   useEffect(() => {
+    rtcRef.current?.connection.setOutputMuted(outputMuted || suspended)
     if (outputMuted) stopPlayback()
-  }, [outputMuted, stopPlayback])
+  }, [outputMuted, suspended, stopPlayback])
 
   useEffect(() => {
     pendingManualInputsRef.current = []
@@ -1225,6 +1262,10 @@ export default function useRealtimeVoice({
   }, [sendSocketEvent])
 
   return {
+    avatarState,
+    avatarStream,
+    avatarError: rtcFailure,
+    retryAvatar: () => { setRtcFailure(''); setAvatarAttempt(value => value + 1); setConnectionAttempt(value => value + 1) },
     state,
     visualState: visualVoiceState(state),
     inputReady,

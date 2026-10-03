@@ -1,6 +1,6 @@
-# DigitalHumanProvider 契约草案
+# DigitalHumanProvider 契约
 
-状态：待评审，接口尚未实现。与 [架构设计](design.zh.md) 一起阅读。本文是框架契约，不是某一家厂商的 SDK 镜像。
+状态：首版契约已落地。`server/src/voice/digital-human/` 提供格式、代次、错误码和编排器；本文仍是框架契约，不是某一家厂商的 SDK 镜像。与 [架构设计](design.zh.md) 一起阅读。
 
 ## 1. 用两个具体实现校验边界
 
@@ -47,7 +47,7 @@ type Capabilities = {
 
 只接收完整文本而无法消费流式回复音频的服务不满足首版契约，应使用另一类适配，而不是悄悄等整句生成完。
 
-## 3. 拟议 SPI
+## 3. SPI（首版）
 
 ```ts
 interface DigitalHumanProvider {

@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import test from 'node:test'
+
 import {
   applySettingsEnvironment,
   normalizeSettings,
@@ -9,6 +10,12 @@ import {
   realtimeSettingsConfiguration,
   updateSettingsContent,
 } from '../src/settings-config.mjs'
+import { viduSettingsValues, viduSettingsFromEnvironment } from '../../shared/digital-human-settings.mjs'
+
+test('Vidu settings inherit environment fallback and preserve explicit empty overrides', () => {
+  assert.equal(viduSettingsFromEnvironment({}, { VIDU_PERSONA_LABEL: 'Configured avatar' }).viduPersonaLabel, 'Configured avatar')
+  assert.equal(viduSettingsFromEnvironment({ VIDU_API_KEY: '' }, { VIDU_API_KEY: 'fallback' }).viduApiKey, '')
+})
 
 const REALTIME_DEFAULTS = {
   wakeShortcut: 'CommandOrControl+Shift+Space',
@@ -47,6 +54,7 @@ const BACKEND_CONNECTION_DEFAULTS = {
 }
 
 const DESKTOP_LANGUAGE_DEFAULT = { language: 'auto' }
+const VIDU_DEFAULTS = viduSettingsValues()
 
 test('round-trips StepFun settings and detects only active provider changes', () => {
   const content = updateSettingsContent('STEPFUN_API_KEY=keep\n', {
@@ -84,6 +92,7 @@ test('reads desktop-owned settings with friendly defaults', () => {
     ...BACKEND_CONNECTION_DEFAULTS,
     nodePath: '',
     ...DESKTOP_LANGUAGE_DEFAULT,
+    ...VIDU_DEFAULTS,
   })
 })
 
@@ -104,6 +113,7 @@ test('shows effective client settings when user config is empty', () => {
     ...BACKEND_CONNECTION_DEFAULTS,
     nodePath: '',
     ...DESKTOP_LANGUAGE_DEFAULT,
+    ...VIDU_DEFAULTS,
   })
 })
 
@@ -172,6 +182,7 @@ test('updates client settings without changing Gateway-owned configuration', () 
     ...BACKEND_CONNECTION_DEFAULTS,
     nodePath: '',
     ...DESKTOP_LANGUAGE_DEFAULT,
+    ...VIDU_DEFAULTS,
   })
 })
 
@@ -208,6 +219,28 @@ test('clears the DashScope key when the field is emptied', () => {
   assert.doesNotMatch(content, /secret/)
 })
 
+test('reads and persists Vidu server settings without exposing a browser setting', () => {
+  const content = updateSettingsContent('', {
+    viduApiKey: 'vda_secret',
+    viduApiHost: 'https://api.vidu.com/',
+    viduAvatarId: 'avatar-1',
+    viduRtcProvider: 'volcengine',
+    viduRtcChannelId: 'channel-1',
+    viduRtcUserId: 'gateway',
+    viduRtcToken: 'rtc-secret',
+    viduRtcBridgeModule: 'C:\\bridges\\vidu.mjs',
+  })
+  assert.match(content, /VIDU_API_KEY=vda_secret/)
+  assert.match(content, /VIDU_RTC_TOKEN=rtc-secret/)
+  const settings = parseSettings(content)
+  assert.equal(settings.viduApiHost, 'api.vidu.com')
+  assert.equal(settings.viduRtcProvider, 'volcengine')
+  assert.equal(settings.viduRtcBridgeModule, 'C:\\bridges\\vidu.mjs')
+  const environment = applySettingsEnvironment(settings, {})
+  assert.equal(environment.VIDU_API_KEY, 'vda_secret')
+  assert.equal(environment.VIDU_RTC_TOKEN, 'rtc-secret')
+})
+
 test('an explicitly empty key and backend override stale process values', () => {
   assert.deepEqual(parseSettings([
     'DASHSCOPE_API_KEY=',
@@ -228,6 +261,7 @@ test('an explicitly empty key and backend override stale process values', () => 
     ...BACKEND_CONNECTION_DEFAULTS,
     nodePath: '',
     ...DESKTOP_LANGUAGE_DEFAULT,
+    ...VIDU_DEFAULTS,
   })
 })
 

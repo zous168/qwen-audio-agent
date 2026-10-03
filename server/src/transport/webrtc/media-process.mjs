@@ -1,5 +1,6 @@
 import { fork } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
+import { serialize } from 'node:v8'
 import { rtcError } from './config.mjs'
 
 const WORKER = new URL('./media-worker.mjs', import.meta.url)
@@ -8,8 +9,8 @@ const MAX_IPC_BYTES = 8 * 1024 * 1024
 // A native crash must never take down the Gateway or its WSS clients. One
 // disposable Node process owns one peer, and receives no provider credentials.
 export class ProcessWebRtcMedia {
-  constructor({ iceServers = [], iceTransportPolicy = 'all', video = false, inputSampleRate = 16000,
-    forkProcess = fork, shutdownTimeoutMs = 2000, onDiagnostic = () => {} } = {}) {
+  constructor({ iceServers = [], iceTransportPolicy = 'all', video = false, videoOutput = false, inputSampleRate = 16000,
+    forkProcess = fork, shutdownTimeoutMs = 2000, onDiagnostic = () => {}, gatewayProtocol = false, duplexControl = false } = {}) {
     this.closed = false
     this.exited = false
     this.opened = false
@@ -17,6 +18,7 @@ export class ProcessWebRtcMedia {
     this.acknowledged = false
     this.forced = false
     this.pendingBytes = 0
+    this.maxIpcBytes = gatewayProtocol ? 24 * 1024 * 1024 : MAX_IPC_BYTES
     this.sequence = 0
     this.pending = new Map()
     this.shutdownTimeoutMs = shutdownTimeoutMs
@@ -41,7 +43,15 @@ export class ProcessWebRtcMedia {
     this.child.on('error', () => this.fail(rtcError(503, 'media_worker_error', 'WebRTC media process failed')))
     this.child.once('close', (code, signal) => this.finishExit(code, signal))
     this.startupTimer = setTimeout(() => this.fail(rtcError(504, 'media_worker_timeout', 'WebRTC media process startup timed out')), 10000)
-    this.post({ type: 'init', options: { iceServers, iceTransportPolicy, video, inputSampleRate } })
+    this.post({ type: 'init', options: {
+      iceServers,
+      iceTransportPolicy,
+      video,
+      inputSampleRate,
+      ...(videoOutput ? { videoOutput: true } : {}),
+      ...(gatewayProtocol ? { gatewayProtocol: true } : {}),
+      ...(duplexControl ? { duplexControl: true } : {}),
+    } })
   }
 
   get inputSampleRate() { return this._inputSampleRate }
@@ -56,8 +66,8 @@ export class ProcessWebRtcMedia {
       if (!closing) this.fail(rtcError(503, 'media_worker_disconnected', 'WebRTC media process disconnected'))
       return false
     }
-    const bytes = Buffer.byteLength(JSON.stringify(message))
-    if (!closing && this.pendingBytes + bytes > MAX_IPC_BYTES) {
+    const bytes = serialize(message).byteLength
+    if (!closing && this.pendingBytes + bytes > this.maxIpcBytes) {
       this.fail(rtcError(503, 'media_worker_backpressure', 'WebRTC media process is not consuming data'))
       return false
     }
@@ -99,7 +109,7 @@ export class ProcessWebRtcMedia {
     } else if (message.type === 'event') this.onEvent?.(message.data)
     else if (message.type === 'audio') this.onAudio?.(message.data)
     else if (message.type === 'image') this.onImage?.(message.data)
-    else if (message.type === 'peer.closed') this.fail(rtcError(503, 'media_peer_closed', 'WebRTC peer closed'))
+    else if (message.type === 'peer.closed') this.fail(rtcError(503, 'media_peer_closed', message.reason || 'WebRTC peer closed'))
   }
 
   async answer(sdp) {
@@ -116,8 +126,9 @@ export class ProcessWebRtcMedia {
   send(event) { this.post({ type: 'send', event }) }
   begin(responseId) { this.post({ type: 'begin', responseId }) }
   append(event) { this.post({ type: 'append', event }) }
+  video(frame) { this.post({ type: 'video', frame }) }
   finish(responseId) { this.post({ type: 'finish', responseId }) }
-  clear() { this.post({ type: 'clear' }) }
+  clear(responseId) { this.post({ type: 'clear', ...(responseId ? { responseId } : {}) }) }
   connected() { return !this.closed && this.online }
   whenClosed() { return this.finished }
 

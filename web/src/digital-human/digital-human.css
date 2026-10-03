@@ -1,0 +1,13 @@
+.digital-human-controls { display: flex; flex: 0 0 auto; align-items: center; gap: 12px; flex-wrap: wrap; padding: 10px 20px; border-bottom: 1px solid #ffffff14; font-size: 12px; }
+.digital-human-controls label { display: flex; align-items: center; gap: 8px; }
+.digital-human-controls select { color: inherit; background: #232130; border: 1px solid #ffffff30; border-radius: 6px; padding: 6px 10px; max-width: 200px; }
+.digital-human-controls select:disabled { opacity: .6; }
+.digital-human-controls [role="status"] { color: #aaa6b5; }
+.digital-human-controls .ghost, .digital-human-panel .ghost { color: #ddd; border: 1px solid #ffffff30; border-radius: 6px; background: #ffffff08; font-size: 12px; padding: 6px 10px; white-space: nowrap; }
+.digital-human-panel { position: relative; flex: 0 0 auto; align-self: center; width: min(100%, 540px); border-radius: 14px; overflow: hidden; background: #15141d; }
+.digital-human-video { display: block; width: 100%; max-height: 32vh; object-fit: contain; }
+.digital-human-placeholder { min-height: 120px; display: grid; place-items: center; color: #aaa6b5; }
+.digital-human-panel > button { position: absolute; right: 12px; bottom: 12px; background: #17151dda; }
+.desktop-conversation-panel .digital-human-controls { padding: 8px 12px; gap: 8px; }
+.desktop-conversation-panel .digital-human-video { max-height: 24vh; }
+.digital-human-orb-video { position: absolute; inset: 12%; width: 76%; height: 76%; border-radius: 50%; object-fit: cover; pointer-events: none; }

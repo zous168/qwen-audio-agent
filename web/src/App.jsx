@@ -17,6 +17,8 @@ import {
 import MessageContent from './MessageContent.jsx'
 import MultimodalComposer from './composer/MultimodalComposer.jsx'
 import VideoCallPanel from './composer/VideoCallPanel.jsx'
+import useDigitalHuman from './digital-human/useDigitalHuman.js'
+import DigitalHumanPanel, { DigitalHumanControls, DigitalHumanVideo } from './digital-human/DigitalHumanPanel.jsx'
 import { desktopClientTools } from './desktop/client-tools.js'
 import TaskArtifacts from './TaskArtifacts.jsx'
 import PermissionActions from './PermissionActions.jsx'
@@ -240,6 +242,7 @@ export default function App() {
   }))
   const [waitingForVoice, setWaitingForVoice] = useState(false)
   const [videoCallOpen, setVideoCallOpen] = useState(false)
+  const digitalHuman = useDigitalHuman()
   const [messages, setMessages] = useState([])
   const [activity, setActivity] = useState(t('正在检查后台 Agent'))
   const [frontend, setFrontend] = useState({ label: 'Realtime Agent' })
@@ -868,6 +871,7 @@ export default function App() {
   )
   const voice = useRealtimeVoice({
     sessionId,
+    avatarPersonaId: digitalHuman.personaId,
     enabled: voiceEnabled || voiceEnabledForWakeWord,
     suspended: desktopOrbMode && desktopLifecycle === 'hidden' && !wakeWordEnabled,
     outputMuted: false,
@@ -1232,7 +1236,9 @@ export default function App() {
         onPointerUp={endOrbDrag}
         onPointerCancel={endOrbDrag}
         >
-        {isBuiltinOrbSkin(orbSkinId) || spriteOrbFailed
+        {digitalHuman.personaId && voice.avatarStream && voice.avatarState !== 'audio_only'
+          ? <DigitalHumanVideo stream={voice.avatarStream} compact />
+          : isBuiltinOrbSkin(orbSkinId) || spriteOrbFailed
           ? (
               <DesktopFluidOrb
                 style={isBuiltinOrbSkin(orbSkinId) ? orbSkinId : 'fluid'}
@@ -1490,6 +1496,7 @@ export default function App() {
       </button>}
     </header>
 
+    <DigitalHumanControls capability={digitalHuman} voice={voice} desktop={desktopOrbMode} />
     {desktopOrbMode && <div className="desktop-audio-feedback" aria-live="off">
       <div className="desktop-audio-feedback-channel input">
         <span>{voiceEnabled
@@ -1514,7 +1521,7 @@ export default function App() {
         onClose={() => setShowKnowledgeLibrary(false)}
         getTask={voice.getTask}
       />}
-      <div className="hero">
+      {digitalHuman.personaId ? <DigitalHumanPanel stream={voice.avatarStream} state={voice.avatarState} onInterrupt={voice.interrupt} /> : <div className="hero">
         <button
           className={`orb ${orbVisualState}`}
           onClick={handleVoiceOrbClick}
@@ -1525,7 +1532,7 @@ export default function App() {
         <p>VOICE FRONTEND</p>
         <h1>{t('你说，我来调度。')}</h1>
         <small>{voice.error || activity}</small>
-      </div>
+      </div>}
 
       <div
         className="messages"

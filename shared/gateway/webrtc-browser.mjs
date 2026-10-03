@@ -1,12 +1,13 @@
-import { encodeWebRtcMessage } from './webrtc-message.mjs'
+import { encodeWebRtcMessage, WebRtcMessageReader, GATEWAY_WEBRTC_MESSAGE_BYTES } from './webrtc-message.mjs'
 
 // Browser transport only. No tools, prompts or visual-observation policy.
 // Shared by the minimal WebRTC page and the X-Omni presentation.
 export class BrowserWebRtcConnection {
   constructor({ sessionId, clientActions = [], takeover = false, fetch: request = globalThis.fetch,
     onEvent = () => {}, onState = () => {}, onError = () => {}, onPlayback = () => {}, audio = null,
-    mediaDevices = globalThis.navigator?.mediaDevices } = {}) {
-    Object.assign(this, { sessionId, clientActions, takeover, request, onEvent, onState, onError, onPlayback, mediaDevices })
+    video = null, avatarPersonaId = '', mediaDevices = globalThis.navigator?.mediaDevices,
+    protocol = 'realtime', onOpen = () => {}, onClose = () => {}, onVideoStream = () => {} } = {}) {
+    Object.assign(this, { sessionId, clientActions, takeover, request, onEvent, onState, onError, onPlayback, video, avatarPersonaId, mediaDevices })
     this.audio = audio || document.createElement('audio')
     this.audio.autoplay = true
     this.audio.muted = false
@@ -17,6 +18,11 @@ export class BrowserWebRtcConnection {
     this.closed = false
     this.microphoneEnabled = false
     this.videoGeneration = 0
+    Object.assign(this, { protocol, onOpen, onClose, onVideoStream })
+    this.messages = new WebRtcMessageReader(protocol === 'gateway' ? { maxBytes: GATEWAY_WEBRTC_MESSAGE_BYTES, timeoutMs: 30000 } : {})
+    this.outgoing = []
+    this.outgoingBytes = 0
+    this.outputMuted = false
   }
 
   async connect() {
@@ -29,24 +35,50 @@ export class BrowserWebRtcConnection {
       this.config = config
       this.context = new AudioContext()
       this.pc = new RTCPeerConnection({ iceServers: config.iceServers, iceTransportPolicy: config.iceTransportPolicy })
-      this.audioSender = this.pc.addTransceiver('audio', { direction: 'sendrecv' }).sender
-      if (config.video_input) this.videoSender = this.pc.addTransceiver('video', { direction: 'sendonly' }).sender
+      // GCP retains the application's existing PCM capture, wake-word and
+      // visual-input paths. Only presentation media uses RTP in this mode.
+      this.audioSender = this.pc.addTransceiver('audio', { direction: this.protocol === 'gateway' ? 'recvonly' : 'sendrecv' }).sender
+      const videoOutput = Boolean(this.avatarPersonaId && config.video_output)
+      const videoInput = config.video_input && this.protocol !== 'gateway'
+      if (videoInput || videoOutput) {
+        const direction = videoInput ? (videoOutput ? 'sendrecv' : 'sendonly') : 'recvonly'
+        const transceiver = this.pc.addTransceiver('video', { direction })
+        if (videoInput) this.videoSender = transceiver.sender
+        if (videoOutput) this.videoReceiver = transceiver.receiver
+      }
       this.pc.onconnectionstatechange = () => {
         clearTimeout(this.disconnectTimer)
         if (this.pc.connectionState === 'failed') this.fail(new Error('WebRTC media connection failed'))
         if (this.pc.connectionState === 'disconnected') this.disconnectTimer = setTimeout(() => this.fail(new Error('WebRTC media connection lost')), 10000)
       }
-      this.pc.ondatachannel = ({ channel }) => {
-        if (channel.label !== 'txt' || this.closed) return
+      const bindChannel = channel => {
+        if (this.closed) return
         this.channel = channel
+        const opened = () => { if (!this.closed) this.onOpen() }
+        channel.onopen = opened
+        if (channel.readyState === 'open') opened()
         channel.onmessage = ({ data }) => {
-          try { this.received(JSON.parse(data)) } catch (error) { this.fail(error) }
+          try {
+            const message = this.messages.read(data)
+            if (message !== null) this.received(JSON.parse(message))
+          } catch (error) { this.fail(error) }
         }
         channel.onclose = () => { if (!this.closed) this.fail(new Error('WebRTC control channel closed')) }
       }
-      this.pc.createDataChannel('oai-events', { ordered: true })
+      this.pc.ondatachannel = ({ channel }) => { if (channel.label === 'txt') bindChannel(channel) }
+      // A bidirectional channel lets SCTP assign the stream id from the
+      // negotiated DTLS role and carries control messages in both directions.
+      bindChannel(this.pc.createDataChannel('oai-events', { ordered: true }))
       this.pc.ontrack = ({ track }) => {
-        if (track.kind !== 'audio' || this.closed) return
+        if (this.closed) return
+        if (track.kind === 'video') {
+          this.onVideoStream(new MediaStream([track]))
+          if (!this.video) return
+          this.video.srcObject = new MediaStream([track])
+          this.video.play().catch(() => {})
+          return
+        }
+        if (track.kind !== 'audio') return
         const stream = new MediaStream([track])
         this.audio.srcObject = stream
         const source = this.context.createMediaStreamSource(stream)
@@ -54,7 +86,7 @@ export class BrowserWebRtcConnection {
         this.analyser.fftSize = 1024
         this.samples = new Float32Array(this.analyser.fftSize)
         source.connect(this.analyser)
-        this.audio.play().catch(() => { if (!this.closed) this.onError(new Error('Click the microphone or Send button to enable audio playback.')) })
+        this.audio.play().catch(() => { if (!this.closed) this.onError(Object.assign(new Error('Click the microphone or Send button to enable audio playback.'), { code: 'playback_blocked' })) })
       }
       this.playbackMeter = setInterval(() => this.measurePlayback(), 50)
       this.connectTimer = setTimeout(() => this.fail(new Error('WebRTC connection timed out')), 25000)
@@ -62,6 +94,9 @@ export class BrowserWebRtcConnection {
       await this.gatherIce()
       if (this.closed) return
       const query = new URLSearchParams({ sessionId: this.sessionId, model: config.model })
+      query.set('control_channel', 'duplex')
+      if (this.protocol === 'gateway') query.set('protocol', 'gateway')
+      if (this.avatarPersonaId) query.set('avatarPersonaId', this.avatarPersonaId)
       if (this.clientActions.length) query.set('client_actions', JSON.stringify(this.clientActions))
       if (this.takeover) query.set('takeover', 'true')
       const answer = await this.request(`/api/v1/webrtc/realtime?${query}`, {
@@ -96,19 +131,42 @@ export class BrowserWebRtcConnection {
   send(event) {
     if (this.closed || this.channel?.readyState !== 'open') return false
     try {
-      const frames = encodeWebRtcMessage({ event_id: crypto.randomUUID(), ...event })
+      const frames = encodeWebRtcMessage({ event_id: crypto.randomUUID(), ...event }, this.protocol === 'gateway' ? { maxBytes: GATEWAY_WEBRTC_MESSAGE_BYTES } : {})
       const bytes = frames.reduce((size, frame) => size + new TextEncoder().encode(frame).length, 0)
+      if (this.protocol === 'gateway') {
+        if (this.outgoingBytes + bytes > 24 * 1024 * 1024) throw new Error('WebRTC command queue is full')
+        this.outgoing.push(...frames.map(frame => ({ frame, bytes: new TextEncoder().encode(frame).length })))
+        this.outgoingBytes += bytes
+        this.flushOutgoing()
+        return true
+      }
       if (this.channel.bufferedAmount + bytes > 1024 * 1024) throw new Error('WebRTC control channel is congested')
       for (const frame of frames) this.channel.send(frame)
       return true
     } catch (error) { this.fail(error); return false }
   }
+  flushOutgoing() {
+    clearTimeout(this.sendTimer)
+    if (this.closed || this.channel?.readyState !== 'open') return
+    try {
+      while (this.outgoing.length && this.channel.bufferedAmount < 256 * 1024) {
+        const item = this.outgoing.shift()
+        this.outgoingBytes -= item.bytes
+        this.channel.send(item.frame)
+      }
+      if (this.outgoing.length) this.sendTimer = setTimeout(() => this.flushOutgoing(), 10)
+    } catch (error) { this.fail(error) }
+  }
   command(event) { return this.send({ type: 'qwaudio.command', event: { event_id: crypto.randomUUID(), ...event } }) }
-  receipt(type, responseId) { return this.send({ type: `qwaudio.playback.${type}`, response_id: responseId }) }
+  receipt(type, responseId) {
+    return this.send(this.protocol === 'gateway'
+      ? { type: `playback.${type}`, responseId, ...(type === 'cancelled' ? { reason: 'user_interruption' } : {}) }
+      : { type: `qwaudio.playback.${type}`, response_id: responseId })
+  }
 
   received(event) {
     if (this.closed) return
-    if (event.type === 'session.updated') {
+    if (event.type === 'session.updated' || (this.protocol === 'gateway' && event.type === 'session.ready')) {
       clearTimeout(this.connectTimer)
       this.ready = true
       this.updateMicrophone()
@@ -118,7 +176,7 @@ export class BrowserWebRtcConnection {
     } else if (event.type === 'qwaudio.output.drained') {
       const output = this.outputs.get(event.response_id)
       if (output) output.drained = performance.now()
-    } else if (event.type === 'output_audio_buffer.cleared') this.clearPlayback()
+    } else if (['output_audio_buffer.cleared', 'playback.clear', 'response.interrupted'].includes(event.type)) this.clearPlayback()
     else if (event.type === 'qwaudio.event') {
       const item = event.event
       if (['input.suspend', 'input.resume'].includes(item.type)) {
@@ -132,7 +190,7 @@ export class BrowserWebRtcConnection {
       }
     }
     this.onEvent(event)
-    if (event.type === 'qwaudio.connection.closed') void this.close()
+    if (event.type === 'qwaudio.connection.closed') void this.close(event.code, event.reason)
   }
 
   async activateAudio() {
@@ -206,8 +264,10 @@ export class BrowserWebRtcConnection {
   }
 
   measurePlayback() {
-    if (!this.analyser || this.audio.paused || this.audio.muted || this.context.state !== 'running') return
-    const level = this.outputLevel()
+    // Muted/autoplay-blocked and silent responses also need a terminal receipt
+    // or the shared session remains stuck waiting for playback forever.
+    const audible = this.analyser && !this.audio.paused && !this.audio.muted && this.context.state === 'running'
+    const level = audible ? this.outputLevel() : 0
     const first = this.outputs.entries().next().value
     if (!first) return
     const [id, output] = first
@@ -216,6 +276,12 @@ export class BrowserWebRtcConnection {
       output.quiet = 0
       if (!output.started) { output.started = true; this.receipt('started', id); this.onPlayback('speaking') }
     } else output.quiet ||= now
+    if (!output.started && output.drained && now - output.drained > 1500) {
+      this.receipt('cancelled', id)
+      this.outputs.delete(id)
+      if (!this.outputs.size) this.onPlayback('idle')
+      return
+    }
     if (output.started && output.drained && now - output.drained > 500 && output.quiet && now - output.quiet > 300) {
       this.receipt('ended', id)
       this.outputs.delete(id)
@@ -233,29 +299,39 @@ export class BrowserWebRtcConnection {
     this.onPlayback('idle')
     this.audio.muted = true
     clearTimeout(this.unmuteTimer)
-    this.unmuteTimer = setTimeout(() => { if (!this.closed) this.audio.muted = false }, 400)
+    this.unmuteTimer = setTimeout(() => { if (!this.closed) this.audio.muted = this.outputMuted }, 400)
   }
+  setOutputMuted(muted) { this.outputMuted = Boolean(muted); this.audio.muted = this.outputMuted }
   interrupt() { this.clearPlayback(); return this.send({ type: 'response.cancel' }) }
-  fail(error) { this.onError(error); void this.close() }
+  fail(error) { this.onError(error); void this.close(1006, 'transport lost') }
   async release() {
     const location = this.location
     this.location = null
     if (location) await this.request(location, { method: 'DELETE', signal: AbortSignal.timeout(3000) }).catch(() => {})
   }
-  close() {
+  close(code = 1000, reason = 'closed') {
     if (this.closed) return this.closing || Promise.resolve()
     this.closed = true
     this.ready = false
     this.abort.abort()
+    this.messages.clear()
     clearInterval(this.playbackMeter)
-    for (const timer of [this.connectTimer, this.disconnectTimer, this.unmuteTimer]) clearTimeout(timer)
+    for (const timer of [this.connectTimer, this.disconnectTimer, this.unmuteTimer, this.sendTimer]) clearTimeout(timer)
+    this.outgoing = []
+    this.outgoingBytes = 0
     this.clearVideo()
     for (const track of this.microphone?.getTracks() || []) track.stop()
     this.pc?.close()
     this.audio.pause()
     this.audio.srcObject = null
+    if (this.video) {
+      this.video.pause?.()
+      this.video.srcObject = null
+    }
     this.outputs.clear()
+    this.onVideoStream(null)
     this.onState('disconnected')
+    this.onClose({ code, reason })
     this.closing = Promise.all([this.context?.close().catch(() => {}), this.release()])
     return this.closing
   }

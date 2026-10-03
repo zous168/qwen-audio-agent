@@ -2,7 +2,7 @@
 
 [English](README.md) | [中文](README_ZH.md)
 
-**状态：已提供演示视频，接入设计仍为待评审方案。** 当前目录尚未提供可直接运行的代码及安装脚本。
+**状态：OpenAvatarChat/FlashHead 路线仍是设计方案；Vidu S 组件版路线已提供可运行的网关接入骨架。** 当前目录不捆绑 GPU Renderer 或厂商 SDK。
 
 基于 GitHub `main` 的 WebRTC PR #465，基线提交 `9ad6348f`，设计日期 2026-09-18。
 
@@ -21,6 +21,10 @@ https://github.com/user-attachments/assets/5301ef5e-b674-4561-93bb-e0c7544cf696
 - 以 LiveAvatar Avatar Only / LITE 校验抽象，不要求首版实现 LiveAvatar 或引入其 SDK。
 - 专用依赖、适配器、安装脚本及部署文件都放在本 example，不加入主框架默认依赖。
 
+## 云厂商替代：Vidu S 组件版
+
+若不自建 GPU + OpenAvatarChat，可用 [Vidu S 外接直播（组件版）](../vidu-digital-human/docs/integration-guide.zh.md)：Qwen Realtime 仍负责对话，Vidu 只消费助手 PCM + 双端转写并推到你的 RTC。适配器应实现同一套 `DigitalHumanProvider` 契约，厂商逻辑留在 `examples/vidu-digital-human/`。
+
 ## 阅读顺序
 
 1. [架构设计](docs/design.zh.md)：职责、链路、框架扩展点、会话及部署边界。
@@ -35,4 +39,4 @@ https://github.com/user-attachments/assets/5301ef5e-b674-4561-93bb-e0c7544cf696
 
 先在 Mac 上完成真实 WebRTC 音视频通路的 Mock，再连接 Linux/NVIDIA 上的 OpenAvatarChat Renderer。Mock 不是模型推理，也不是浏览器本地动嘴动画。
 
-安装和启动命令将在实现时交付；当前不要把文档中的拟议脚本、配置字段或接口当成已经可用。
+OpenAvatarChat Renderer 的安装命令仍待实现；Vidu 路线的配置和启动命令见上面的专用 example 及[接入说明](../vidu-digital-human/docs/integration-guide.zh.md)。

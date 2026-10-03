@@ -1,6 +1,6 @@
 import { EventEmitter } from 'node:events'
 import { randomUUID } from 'node:crypto'
-import { WebRtcMessageReader } from '../../../../shared/gateway/webrtc-message.mjs'
+import { WebRtcMessageReader, GATEWAY_WEBRTC_MESSAGE_BYTES } from '../../../../shared/gateway/webrtc-message.mjs'
 import {
   createGatewaySessionHello,
   GATEWAY_CLIENT_IMPLEMENTED_CAPABILITIES,
@@ -13,24 +13,30 @@ const id = () => `evt_rtc_${randomUUID()}`
 // The runtime sees the same connection contract as WebSocket. Neither the
 // media engine nor vendor-shaped wire events own sessions, tools or history.
 export class WebRtcConnection extends EventEmitter {
-  constructor({ media, sessionId, provider, takeover = false, clientActions = [] }) {
+  constructor({ media, sessionId, provider, takeover = false, clientActions = [], videoInput = false, videoOutput = false, avatarPersonaId = '', protocol = 'realtime' }) {
     super()
     this.media = media
     this.sessionId = sessionId
     this.provider = provider
     this.takeover = takeover
     this.clientActions = clientActions
-    this.messages = new WebRtcMessageReader()
+    this.messages = new WebRtcMessageReader(protocol === 'gateway' ? { maxBytes: GATEWAY_WEBRTC_MESSAGE_BYTES, timeoutMs: 30000 } : {})
     this.readyState = 1
     this.voice = provider.voice?.() || ''
     this.ready = false
     this.pendingItem = null
     this.update = null
-    this.video = provider.modelProfile?.()?.transportCapabilities?.imageBufferInput === true
+    this.video = videoInput
+    this.videoOutput = videoOutput
+    this.avatarPersonaId = avatarPersonaId
     this.inputAllowed = true
+    this.protocol = protocol
   }
 
   start() {
+    // The shared application sends its own GCP hello, including desktop tools,
+    // presence, capabilities and recovery. The example keeps its legacy facade.
+    if (this.protocol === 'gateway') return
     this.input(createGatewaySessionHello({
       clientType: 'web',
       clientInstanceId: randomUUID(),
@@ -52,7 +58,14 @@ export class WebRtcConnection extends EventEmitter {
       modalities: ['text', 'audio'],
       voice: this.voice,
       turn_detection: this.provider.modelProfile?.()?.sessionDefaults?.turnDetection || null,
-      qwaudio: { transport: 'webrtc', video_input: this.video, protocol: '0.1', experimental: true },
+      qwaudio: {
+        transport: 'webrtc',
+        video_input: this.video,
+        video_output: this.videoOutput,
+        ...(this.avatarPersonaId ? { avatar_persona_id: this.avatarPersonaId } : {}),
+        protocol: '0.1',
+        experimental: true,
+      },
     }
   }
 
@@ -75,6 +88,12 @@ export class WebRtcConnection extends EventEmitter {
       if (raw === null) return
       event = JSON.parse(raw)
       if (!event || typeof event.type !== 'string') throw new Error('event type required')
+      if (this.protocol === 'gateway') {
+        // Validation, authorization and capability negotiation belong to the
+        // same GatewayClientProtocolSession used by the WebSocket ingress.
+        this.input(event)
+        return
+      }
       if (event.type === 'session.update') {
         const session = event.session
         if (!session || typeof session !== 'object' || Array.isArray(session)) throw new Error('session object required')
@@ -151,6 +170,21 @@ export class WebRtcConnection extends EventEmitter {
 
   send(raw) {
     const event = JSON.parse(raw)
+    if (this.protocol === 'gateway') {
+      if (event.type === 'voice.ready') {
+        this.ready = true
+        this.media.inputSampleRate = event.inputSampleRate
+      }
+      if (event.type === 'voice.connection' && event.state !== 'connected') this.ready = false
+      if (event.type === 'input.suspend') this.inputAllowed = false
+      if (event.type === 'input.resume') this.inputAllowed = true
+      if (event.type === 'response.started') this.media.begin?.(event.responseId)
+      if (['playback.clear', 'response.interrupted'].includes(event.type)) this.media.clear(event.responseId)
+      if (event.type === 'audio.delta') { this.media.append(event); return }
+      if (event.type === 'audio.done') this.media.finish(event.responseId)
+      this.output(event)
+      return
+    }
     if (event.type === 'session.ready') {
       this.output({ type: 'session.created', session: this.description() })
     } else if (event.type === 'voice.ready') {
@@ -195,6 +229,7 @@ export class WebRtcConnection extends EventEmitter {
   }
 
   onResponseDone(response) {
+    if (this.protocol === 'gateway') return
     this.output({ type: 'response.done', response })
   }
 

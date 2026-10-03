@@ -19,18 +19,29 @@ export function parseClientActions(value) {
   return actions
 }
 
-export function validateOffer(sdp, { video }) {
+export function validateOffer(sdp, { videoInput = false, videoOutput = false } = {}) {
   if (typeof sdp !== 'string' || !sdp.startsWith('v=0') || Buffer.byteLength(sdp) > 65536) throw rtcError(400, 'invalid_sdp', 'SDP offer required (max 64 KiB)')
   const media = sdp.split(/\r?\n/).filter(line => /^m=/.test(line) && !/^m=\S+ 0 /.test(line))
   const count = kind => media.filter(line => line.startsWith(`m=${kind} `)).length
   if (count('audio') !== 1 || count('application') !== 1 || count('video') > 1 || media.length !== 2 + count('video')) throw rtcError(400, 'unsupported_media', 'Offer one audio track, one DataChannel transport and optionally one video track')
-  if (count('video') && !video) throw rtcError(400, 'video_unsupported', 'The configured model does not support video input')
+  if (videoOutput && count('video') !== 1) throw rtcError(400, 'video_required', 'Digital human output requires a video transceiver')
+  if (count('video') && !videoInput && !videoOutput) throw rtcError(400, 'video_unsupported', 'The configured session does not support video')
 }
 
 // Registered after the application's existing identity and origin middleware.
 // Authentication precedes parsing SDP or allocating any native media resources.
-export function registerWebRtcIngress(app, { options, getGateway, providerRegistry, providerName, logger }) {
+export function registerWebRtcIngress(app, { options, getGateway, providerRegistry, providerName, logger, digitalHuman = null }) {
   options = options === undefined ? webRtcOptions() : options
+  // Public presentation metadata only, behind the application's authentication.
+  // No credentials, avatar URLs or vendor connection data reach the renderer.
+  app.get('/api/digital-human', (_req, res) => {
+    const provider = providerRegistry.resolve(providerName)
+    const supported = provider.key === 'dashscope' && ['audio', 'omni'].includes(provider.modelProfile?.()?.family)
+    const available = Boolean(options?.enabled && digitalHuman?.available && supported)
+    res.setHeader('cache-control', 'no-store')
+    res.json({ available, personas: available ? (digitalHuman.personas?.() || []).map(({ id, label }) => ({ id, label })) : [],
+      reason: available ? null : !digitalHuman?.available ? (digitalHuman?.reason || 'not_configured') : !supported ? 'model_unsupported' : 'transport_disabled' })
+  })
   if (!options?.enabled) return null
   const connections = new Map()
   const retiring = new Set()
@@ -51,7 +62,16 @@ export function registerWebRtcIngress(app, { options, getGateway, providerRegist
     try {
       const { provider, video } = describe()
       res.setHeader('cache-control', 'no-store')
-      res.json({ model: provider.model(), video_input: video, iceServers: options.iceServers || [], iceTransportPolicy: options.iceTransportPolicy || 'all' })
+      res.json({
+        model: provider.model(),
+        video_input: video,
+        video_output: Boolean(digitalHuman?.available),
+        digital_human: digitalHuman?.available
+          ? { available: true, personas: (digitalHuman.personas?.() || []).map(({ id, label }) => ({ id, label })) }
+          : { available: false, personas: [] },
+        iceServers: options.iceServers || [],
+        iceTransportPolicy: options.iceTransportPolicy || 'all',
+      })
     } catch (error) { errorResponse(res, error) }
   })
   app.get('/api/realtime/webrtc/example', (_req, res) => res.sendFile(fileURLToPath(new URL('index.html', EXAMPLE))))
@@ -73,13 +93,40 @@ export function registerWebRtcIngress(app, { options, getGateway, providerRegist
       if (typeof sessionId !== 'string' || !/^[A-Za-z0-9_.:-]{1,128}$/.test(sessionId)) throw rtcError(400, 'session_id', 'invalid sessionId')
       if (req.query.takeover && req.query.takeover !== 'true') throw rtcError(400, 'takeover', 'takeover must be true or omitted')
       const clientActions = parseClientActions(req.query.client_actions)
-      validateOffer(req.body, { video })
+      const protocol = req.query.protocol || 'realtime'
+      if (!['gateway', 'realtime'].includes(protocol)) throw rtcError(400, 'protocol', 'Unsupported WebRTC protocol')
+      const controlChannel = req.query.control_channel || 'legacy'
+      if (!['legacy', 'duplex'].includes(controlChannel)) throw rtcError(400, 'control_channel', 'Unsupported control channel mode')
+      const avatarPersonaId = String(req.query.avatarPersonaId || '').trim()
+      let digitalHumanSession = { enabled: false }
+      if (avatarPersonaId) {
+        if (!digitalHuman?.available || typeof digitalHuman.resolvePersona !== 'function') {
+          throw rtcError(409, 'digital_human_unavailable', 'Digital human output is not available')
+        }
+        const persona = digitalHuman.resolvePersona(avatarPersonaId)
+        if (!persona) throw rtcError(400, 'avatar_persona', 'Unknown avatar persona')
+        digitalHumanSession = { enabled: true, personaId: avatarPersonaId, persona }
+      }
+      const videoOutput = digitalHumanSession.enabled === true
+      validateOffer(req.body, { videoInput: video, videoOutput })
       if (!provider.isConfigured()) throw rtcError(503, 'provider_not_configured', 'Configure the Gateway provider credential first')
       const media = factory({
-        ...options, video, inputSampleRate: provider.inputSampleRate,
+        ...options, video, videoOutput, inputSampleRate: provider.inputSampleRate,
+        ...(protocol === 'gateway' ? { gatewayProtocol: true } : {}),
+        ...(controlChannel === 'duplex' ? { duplexControl: true } : {}),
         onDiagnostic: fields => logger?.warn('webrtc.media_worker_failed', fields),
       })
-      connection = new WebRtcConnection({ media, sessionId, provider, takeover: req.query.takeover === 'true', clientActions })
+      connection = new WebRtcConnection({
+        media,
+        sessionId,
+        provider,
+        takeover: req.query.takeover === 'true',
+        clientActions,
+        videoInput: video,
+        videoOutput,
+        avatarPersonaId,
+        protocol,
+      })
       connectionId = randomUUID()
       const record = { connection, ownerId: req.identity.ownerId }
       connections.set(connectionId, record)
@@ -113,7 +160,14 @@ export function registerWebRtcIngress(app, { options, getGateway, providerRegist
       }
       // Attach before ICE negotiation so credential revocation and shutdown
       // cover pending peers as well as fully established sessions.
-      getGateway().attachClient(connection, { identity: req.identity, sessionId })
+      getGateway().attachClient(connection, {
+        identity: req.identity,
+        sessionId,
+        sessionOptions: {
+          digitalHumanSession,
+          mediaOutput: media,
+        },
+      })
       res.once('close', () => { if (!res.writableFinished) connection.close(1000, 'request aborted') })
       const sdp = await Promise.race([media.answer(req.body), closedDuringNegotiation])
       if (closed || connection.readyState !== 1) throw rtcError(503, 'connection_closed', 'WebRTC connection closed')

@@ -50,6 +50,7 @@ export function registerGatewayHttpRoutes(app, {
   sessionJournalRuntime,
   optionalModules,
   webrtc,
+  digitalHuman = null,
   getGateway,
 }) {
   app.disable('x-powered-by')
@@ -573,6 +574,7 @@ export function registerGatewayHttpRoutes(app, {
     getGateway,
     providerRegistry: realtimeProviderRegistry,
     providerName: realtimeProvider,
+    digitalHuman,
   })
   app.use('/api', (_req, res) => res.status(404).json({ error: 'not found' }))
 

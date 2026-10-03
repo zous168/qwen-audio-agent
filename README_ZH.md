@@ -212,6 +212,7 @@ npm run desktop:build:linux      # Linux（AppImage + deb，无需签名）
 | X-Omni | 视觉对话、按需采集、可选画面观察与解说。 | [示例](https://github.com/QwenAudio/qwen-audio-agent/tree/main/examples/x-omni/README_ZH.md) | 已提供 |
 | AI Passport | 在硬件卡片上运行千问语音豆，进行语音对话与后台任务交互；目前仅开放半双工。 | [示例][ai-passport-example] | 已提供 |
 | 客服助手 | 零售与航空场景的语音客服。 | [示例](https://github.com/QwenAudio/qwen-audio-agent/tree/main/examples/customer-service/README_ZH.md) | 已提供 |
+| Vidu 数字人 | Qwen Realtime 负责对话；桌面与 Web 共用主界面的形象选择、视频和降级。主 Gateway 加载 Vidu 渲染适配器，桌面设置管理本机配置。 | [接入说明](examples/vidu-digital-human/docs/integration-guide.zh.md) | 主界面已接入；厂商 RTC 桥及云端实测待完成 |
 | 具身智能 | 语音指令、动作执行、巡检和异常反馈。 | 待补充 | 规划中 |
 | 直播助手 | 弹幕互动、商品讲解、优惠发放和风险提醒。 | 待补充 | 规划中 |
 

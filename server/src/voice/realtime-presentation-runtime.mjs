@@ -207,14 +207,14 @@ export class RealtimePresentationRuntime {
     return context
   }
 
-  handle(event) {
+  handle(event, { suppressAudio = false, suppressAudioDone = false } = {}) {
     if (!PRESENTATION_RESPONSE_EVENTS.has(event?.type)) return false
     if (event.type === 'response.created') return true
     if (
       event.type === 'response.audio.delta'
       || event.type === 'response.output_audio.delta'
     ) {
-      this.#audioDelta(event)
+      this.#audioDelta(event, { suppressAudio })
     } else if (
       event.type === 'response.audio_transcript.delta'
       || event.type === 'response.output_audio_transcript.delta'
@@ -230,7 +230,7 @@ export class RealtimePresentationRuntime {
     } else if (event.type === 'response.text.done') {
       this.#textDone(event)
     } else if (event.type === 'response.done') {
-      this.#responseDone(event)
+      this.#responseDone(event, { suppressAudioDone })
     }
     return true
   }
@@ -243,7 +243,7 @@ export class RealtimePresentationRuntime {
     )
   }
 
-  #audioDelta(event) {
+  #audioDelta(event, { suppressAudio = false } = {}) {
     const id = realtimeResponseId(event)
     const context = this.#contextFor(event)
     if (context?.suppressed) return
@@ -256,14 +256,16 @@ export class RealtimePresentationRuntime {
         origin: context.origin || 'model',
       })
     }
-    this.send({
-      type: GatewayServerEvent.AUDIO_DELTA,
-      audio: event.delta,
-      sampleRate: Number(event.sampleRate)
-        || this.getFrontend().provider.outputSampleRate,
-      responseId: id,
-      turnId: responseTurnId,
-    })
+    if (!suppressAudio) {
+      this.send({
+        type: GatewayServerEvent.AUDIO_DELTA,
+        audio: event.delta,
+        sampleRate: Number(event.sampleRate)
+          || this.getFrontend().provider.outputSampleRate,
+        responseId: id,
+        turnId: responseTurnId,
+      })
+    }
   }
 
   #audioTranscriptDelta(event) {
@@ -333,7 +335,7 @@ export class RealtimePresentationRuntime {
     })
   }
 
-  #responseDone(event) {
+  #responseDone(event, { suppressAudioDone = false } = {}) {
     const id = realtimeResponseId(event)
     const context = this.contexts.get(id)
     const terminalToolResponse = this.toolCalls.consumeTerminalToolResponse(id)
@@ -368,11 +370,13 @@ export class RealtimePresentationRuntime {
       transcript: context?.assistantTranscript || '',
     })
     if (!context?.suppressed) {
-      this.send({
-        type: GatewayServerEvent.AUDIO_DONE,
-        responseId: id,
-        turnId: responseTurnId,
-      })
+      if (!suppressAudioDone) {
+        this.send({
+          type: GatewayServerEvent.AUDIO_DONE,
+          responseId: id,
+          turnId: responseTurnId,
+        })
+      }
       if (!context?.hasAudio && !toolFollowUpPending) {
         this.send({
           type: GatewayServerEvent.VOICE_STATE,

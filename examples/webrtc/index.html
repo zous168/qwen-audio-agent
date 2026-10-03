@@ -13,6 +13,7 @@
   <a class="brand" href="/api/realtime/webrtc/example" aria-label="qwen-audio-agent"><span class="brand-icon">V</span><span>qwen-audio-agent<small>REALTIME VOICE · WEBRTC</small></span></a>
   <span class="transport-badge"><i></i>WebRTC</span>
   <div class="model-picker"><b id="model-label">正在读取模型</b><small id="model-capabilities">模型在启动时指定</small></div>
+  <label class="avatar-picker" id="avatar-picker" hidden>数字人<select id="avatar-persona"><option value="">关闭</option></select></label>
   <button class="ghost" id="new-session">新会话</button>
   <button class="icon-button" id="settings-toggle" aria-label="连接设置" aria-expanded="false"><svg viewBox="0 0 24 24"><path d="M4 7h16M4 17h16M8 4v6m8 4v6"/></svg></button>
   <button id="connect" class="primary">连接语音</button><button id="disconnect" class="ghost" disabled>断开</button>
@@ -37,6 +38,7 @@
     <div id="message-list"></div>
   </section>
   <aside id="camera-panel" class="camera-panel" hidden><div><span><i></i>实时画面</span><small>Omni 输入</small></div><video id="preview" autoplay muted playsinline></video></aside>
+  <aside id="avatar-panel" class="avatar-panel" hidden><div><span><i></i>数字人输出</span><small>Vidu S</small></div><video id="avatar" autoplay playsinline></video></aside>
   <form id="message" class="composer">
     <label for="text" class="sr-only">消息</label><textarea id="text" rows="2" maxlength="16000" placeholder="输入消息，或直接开口说话…"></textarea>
     <div class="composer-toolbar"><button type="button" id="mute" class="ghost" disabled aria-pressed="false"><svg viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M6 11a6 6 0 0 0 12 0m-6 6v4m-3 0h6"/></svg><span>麦克风开启</span></button><label class="camera-toggle"><input type="checkbox" id="camera"><svg viewBox="0 0 24 24"><rect x="3" y="6" width="12" height="12" rx="3"/><path d="m15 10 6-3v10l-6-3"/></svg>摄像头</label><span class="input-hint">Enter 发送 · Shift + Enter 换行</span><button id="interrupt" type="button" class="ghost" disabled>打断</button><button id="send" class="primary" disabled>发送 <span aria-hidden="true">↑</span></button></div>

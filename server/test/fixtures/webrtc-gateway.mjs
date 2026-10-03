@@ -1,6 +1,7 @@
 import express from 'express'
 import { createServer } from 'node:http'
 import { randomUUID } from 'node:crypto'
+import { fileURLToPath } from 'node:url'
 import { attachTestGateway } from './gateway-runtime.mjs'
 import { registerWebRtcIngress } from '../../src/transport/webrtc/routes.mjs'
 import { ProcessWebRtcMedia } from '../../src/transport/webrtc/media-process.mjs'
@@ -21,6 +22,9 @@ export function testProvider(video = false) {
 }
 
 export class FakeMedia {
+  constructor(settings = {}) {
+    this.videoOutput = settings.videoOutput === true
+  }
   events = []
   chunks = []
   closed = false
@@ -42,7 +46,7 @@ export async function waitUntil(predicate, timeout = 3000) {
   }
 }
 
-export async function rtcHarness(t, { video = false, options = {}, realMedia = false } = {}) {
+export async function rtcHarness(t, { video = false, options = {}, realMedia = false, digitalHuman = null, webApp = false, clientCommandRuntime = null } = {}) {
   const provider = testProvider(video)
   const media = []
   const frontends = []
@@ -66,7 +70,7 @@ export async function rtcHarness(t, { video = false, options = {}, realMedia = f
     backendAvailability: { snapshot: () => ({ configured: false, ok: false, known: true }) },
     respondAuthorization: async () => ({}),
     permissionPolicy: { resolveDecision: () => null, rememberDecision() {} },
-    logger, realtimeProviderRegistry: registry, defaultRealtimeProvider: 'dashscope',
+    logger, realtimeProviderRegistry: registry, defaultRealtimeProvider: 'dashscope', digitalHuman, clientCommandRuntime,
     realtimeFrontendFactory: factoryOptions => {
       const frontend = {
         provider, capabilities: provider.capabilities, ready: false, audio: [], images: [], inputs: [],
@@ -89,14 +93,20 @@ export async function rtcHarness(t, { video = false, options = {}, realMedia = f
     options: {
       enabled: true,
       mediaFactory: settings => {
-        const instance = realMedia ? new ProcessWebRtcMedia(settings) : new FakeMedia()
+        const instance = realMedia ? new ProcessWebRtcMedia(settings) : new FakeMedia(settings)
         media.push(instance)
         return instance
       },
       ...options,
     },
-    getGateway: () => gateway, providerRegistry: registry, providerName: 'dashscope',
+    getGateway: () => gateway, providerRegistry: registry, providerName: 'dashscope', digitalHuman,
   })
+  if (webApp) {
+    const profile = { id: provider.model(), label: 'Test Realtime', family: video ? 'omni' : 'audio', modelCapabilities: { textInput: true, audioInput: true }, transportCapabilities: { textInput: true, audioInput: true, imageBufferInput: video } }
+    app.get('/api/health', (_req, res) => res.json({ ok: true, assistantName: 'Test Assistant', realtimeModel: profile.id, realtimeModelProfile: profile, realtimeModelCatalog: [profile], backend: { enabled: false } }))
+    app.get('/api/session-agents', (_req, res) => res.json({ agents: [] }))
+    app.use(express.static(fileURLToPath(new URL('../../../web/dist/', import.meta.url))))
+  }
   app.use((_req, res) => res.sendStatus(404))
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
   const base = `http://127.0.0.1:${server.address().port}`
